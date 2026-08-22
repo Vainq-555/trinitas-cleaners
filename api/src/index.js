@@ -4,3 +4,4 @@ import { PORT } from "./config.js";
 app.listen(PORT, () => {
   console.log(`Trinitas-Cleaners API listening on http://localhost:${PORT}`);
 });
+

@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: trinitas-cleaners-api
+    runtime: node
+    rootDir: api
+    plan: free
+    region: oregon
+    buildCommand: npm install && npx prisma generate
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: CORS_ORIGIN
+        value: https://web.trinitaso.com
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false

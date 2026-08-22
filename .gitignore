@@ -10,3 +10,10 @@ npm-debug.log*
 # Secrets and generated deployment files
 .dev.vars
 .open-next/
+
+api/.env.production
+
+firebase-debug.log
+firebase-debug.*.log
+
+.wrangler/
