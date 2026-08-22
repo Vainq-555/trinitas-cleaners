@@ -1,0 +1,19 @@
+# Optional local PostgreSQL for production parity.
+# Usage:  docker compose up -d
+# Then set api/.env DATABASE_URL="postgresql://trinitas:trinitas@localhost:5432/trinitas?schema=public"
+# and change provider to "postgresql" in api/prisma/schema.prisma, then `npm run prisma:setup` in api/.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: trinitas-db
+    environment:
+      POSTGRES_USER: trinitas
+      POSTGRES_PASSWORD: trinitas
+      POSTGRES_DB: trinitas
+    ports:
+      - "5432:5432"
+    volumes:
+      - trinitas_pgdata:/var/lib/postgresql/data
+
+volumes:
+  trinitas_pgdata:

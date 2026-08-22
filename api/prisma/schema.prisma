@@ -1,0 +1,147 @@
+// Trinitas-Cleaners — Prisma schema
+// Works out of the box on SQLite (zero-setup dev).
+// To switch to PostgreSQL: set provider to "postgresql", DATABASE_URL to your
+// Postgres DSN, then run `npx prisma migrate dev --name init`.
+//
+// NOTE: SQLite does not support Prisma native enums, so role/status/type
+// fields are Strings validated in the application layer (see
+// api/src/utils/validators.js). On PostgreSQL you may convert them to enums.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  address      String?
+  role         String   @default("customer") // "admin" | "customer"
+  status       String   @default("offline") // "online" | "offline"
+  lastActiveAt DateTime?
+  createdAt    DateTime @default(now())
+
+  bookings     Booking[]
+  receipts     Receipt[]
+  messagesSent Message[]  @relation("Sender")
+  messagesRecv Message[]  @relation("Receiver")
+  customPrices CustomPrice[]
+  broadcastReads UserBroadcastRead[]
+  broadcasts   Broadcast[]
+  @@index([role])
+}
+
+model Service {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  basePrice   Float
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  bookings     Booking[]
+  customPrices CustomPrice[]
+}
+
+// Per-customer price override. Existence of a row overrides basePrice for
+// that customer only ("individually target a specific customer account").
+model CustomPrice {
+  id         String  @id @default(cuid())
+  serviceId  String
+  customerId String
+  price      Float
+
+  service  Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  customer User    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, customerId])
+}
+
+model Booking {
+  id         String   @id @default(cuid())
+  customerId String
+  serviceId  String
+  date       DateTime
+  note       String?
+  // "pending" | "accepted" | "declined" | "worked"
+  status     String   @default("pending")
+  price      Float    // price quoted at booking time (after any override)
+  createdAt  DateTime @default(now())
+
+  customer User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  service  Service  @relation(fields: [serviceId], references: [id])
+  receipts Receipt[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model Receipt {
+  id         String   @id @default(cuid())
+  customerId String
+  bookingId  String?
+  subtotal   Float
+  taxRate    Float    @default(0.0725)
+  tax        Float
+  discount   Float    @default(0)
+  total      Float
+  note       String?
+  pdfUrl     String?
+  createdAt  DateTime @default(now())
+
+  customer User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  booking  Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([customerId])
+}
+
+model Message {
+  id         String   @id @default(cuid())
+  senderId   String
+  receiverId String
+  content    String
+  readAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  sender   User @relation("Sender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("Receiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+}
+
+// "notification" | "announcement"
+model Broadcast {
+  id        String   @id @default(cuid())
+  type      String
+  // "public" | "all" | "specific_user"
+  target    String
+  title     String?
+  content   String
+  userId    String? // set when target = "specific_user"
+  createdAt DateTime @default(now())
+
+  user     User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readBy   UserBroadcastRead[]
+
+  @@index([type])
+  @@index([target])
+}
+
+model UserBroadcastRead {
+  userId      String
+  broadcastId String
+  readAt      DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  broadcast Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@id([userId, broadcastId])
+}

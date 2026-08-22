@@ -1,0 +1,12 @@
+{
+  "name": "trinitas-cleaners",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Trinitas-Cleaners dual-portal booking system (Customer Portal + Admin Portal)",
+  "scripts": {
+    "setup": "cd api && npm install && npm run prisma:setup && cd ../web && npm install",
+    "dev:api": "cd api && npm run dev",
+    "dev:web": "cd web && npm run dev",
+    "build": "cd api && npm run build 2>/dev/null; cd ../web && npm run build"
+  }
+}

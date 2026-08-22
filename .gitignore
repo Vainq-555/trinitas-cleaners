@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.next/
+.env
+*.local
+api/prisma/dev.db
+api/prisma/dev.db-journal
+.DS_Store
+npm-debug.log*
+# Secrets and generated deployment files
+.dev.vars
+.open-next/
