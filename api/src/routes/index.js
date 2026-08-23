@@ -8,6 +8,7 @@ import * as receipts from "../controllers/receipts.js";
 import * as messages from "../controllers/messages.js";
 import * as broadcasts from "../controllers/broadcasts.js";
 import * as users from "../controllers/users.js";
+import * as payments from "../controllers/payments.js";
 
 const router = Router();
 
@@ -28,6 +29,7 @@ router.delete("/auth/account", authenticate, auth.deleteAccount);
 // ---------- Customer ----------
 router.get("/bookings", authenticate, requireCustomer, bookings.listMyBookings);
 router.post("/bookings", authenticate, requireCustomer, bookings.createBooking);
+router.post("/bookings/:id/checkout", authenticate, requireCustomer, payments.createCheckout);
 router.delete("/bookings/:id", authenticate, bookings.deleteBooking);
 
 router.get("/receipts", authenticate, requireCustomer, receipts.listMyReceipts);

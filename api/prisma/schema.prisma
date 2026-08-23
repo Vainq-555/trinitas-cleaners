@@ -17,24 +17,25 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String    @id @default(cuid())
+  email        String    @unique
   passwordHash String
   name         String
   phone        String?
   address      String?
-  role         String   @default("customer") // "admin" | "customer"
-  status       String   @default("offline") // "online" | "offline"
+  role         String    @default("customer") // "admin" | "customer"
+  status       String    @default("offline") // "online" | "offline"
   lastActiveAt DateTime?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
 
-  bookings     Booking[]
-  receipts     Receipt[]
-  messagesSent Message[]  @relation("Sender")
-  messagesRecv Message[]  @relation("Receiver")
-  customPrices CustomPrice[]
+  bookings       Booking[]
+  receipts       Receipt[]
+  messagesSent   Message[]           @relation("Sender")
+  messagesRecv   Message[]           @relation("Receiver")
+  customPrices   CustomPrice[]
   broadcastReads UserBroadcastRead[]
-  broadcasts   Broadcast[]
+  broadcasts     Broadcast[]
+
   @@index([role])
 }
 
@@ -53,7 +54,7 @@ model Service {
 // Per-customer price override. Existence of a row overrides basePrice for
 // that customer only ("individually target a specific customer account").
 model CustomPrice {
-  id         String  @id @default(cuid())
+  id         String @id @default(cuid())
   serviceId  String
   customerId String
   price      Float
@@ -72,15 +73,45 @@ model Booking {
   note       String?
   // "pending" | "accepted" | "declined" | "worked"
   status     String   @default("pending")
-  price      Float    // price quoted at booking time (after any override)
+  price      Float // price quoted at booking time (after any override)
   createdAt  DateTime @default(now())
 
-  customer User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  service  Service  @relation(fields: [serviceId], references: [id])
+  customer User      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  service  Service   @relation(fields: [serviceId], references: [id])
   receipts Receipt[]
+  payment  Payment?
 
   @@index([customerId])
   @@index([status])
+}
+
+model Payment {
+  id                      String    @id @default(cuid())
+  bookingId               String    @unique
+  method                  String
+  status                  String    @default("pending")
+  amount                  Float
+  amountPaid              Float     @default(0)
+  currency                String    @default("usd")
+  stripeCheckoutSessionId String?   @unique
+  stripePaymentIntentId   String?   @unique
+  failureReason           String?
+  paidAt                  DateTime?
+  refundedAt              DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([method])
+}
+
+model StripeWebhookEvent {
+  id          String   @id @default(cuid())
+  eventId     String   @unique
+  eventType   String
+  processedAt DateTime @default(now())
 }
 
 model Receipt {
@@ -103,12 +134,12 @@ model Receipt {
 }
 
 model Message {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   senderId   String
   receiverId String
   content    String
   readAt     DateTime?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   sender   User @relation("Sender", fields: [senderId], references: [id], onDelete: Cascade)
   receiver User @relation("Receiver", fields: [receiverId], references: [id], onDelete: Cascade)
@@ -128,8 +159,8 @@ model Broadcast {
   userId    String? // set when target = "specific_user"
   createdAt DateTime @default(now())
 
-  user     User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  readBy   UserBroadcastRead[]
+  user   User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readBy UserBroadcastRead[]
 
   @@index([type])
   @@index([target])

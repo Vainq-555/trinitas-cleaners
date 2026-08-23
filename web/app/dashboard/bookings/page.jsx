@@ -71,8 +71,8 @@ export default function BookingsPage() {
           <div className="overflow-x-auto">
             <table className="table">
               <thead>
-                <tr>
-                  <th>Service</th><th>Date</th><th>Status</th><th>Price</th><th>Note</th><th className="text-right">Actions</th>
+                  <tr>
+                   <th>Service</th><th>Date</th><th>Status</th><th>Price</th><th>Payment</th><th>Note</th><th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -82,6 +82,10 @@ export default function BookingsPage() {
                     <td className="text-muted">{fmtDate(b.date)}</td>
                     <td><StatusBadge status={b.status} /></td>
                     <td className="font-semibold">{money(b.price)}</td>
+                    <td className="text-xs">
+                      <div className="font-semibold capitalize">{b.payment?.method || "—"}</div>
+                      <div className={b.payment?.status === "paid" ? "text-clean" : "text-muted"}>{b.payment?.status || "—"}</div>
+                    </td>
                     <td className="text-muted text-xs max-w-[180px] truncate">{b.note || "—"}</td>
                     <td className="text-right">
                       {b.status === "pending" && (

@@ -121,9 +121,12 @@ export default function InspectUserPage({ params }) {
                     <div className="font-semibold text-ink truncate">{b.service.name}</div>
                     <div className="text-xs text-muted">{fmtDate(b.date)}</div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <StatusBadge status={b.status} />
-                    <div className="mt-1 text-xs font-semibold">{money(b.price)}</div>
+                    <div className="text-right shrink-0">
+                      <StatusBadge status={b.status} />
+                      <div className="mt-1 text-xs font-semibold">{money(b.price)}</div>
+                      <div className="mt-1 text-[11px] capitalize text-muted">{b.payment?.method || "—"} · {b.payment?.status || "—"}</div>
+                      {b.payment?.amountPaid > 0 && <div className="text-[11px] text-clean">{money(b.payment.amountPaid)} paid</div>}
+                      {b.payment?.stripePaymentIntentId && <div className="max-w-[150px] truncate text-[10px] text-muted" title={b.payment.stripePaymentIntentId}>{b.payment.stripePaymentIntentId}</div>}
                   </div>
                 </div>
               ))}

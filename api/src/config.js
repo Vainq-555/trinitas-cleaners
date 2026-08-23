@@ -19,3 +19,7 @@ export const BROADCAST_TARGET = ["public", "all", "specific_user"];
 
 // Users idle longer than this (ms) are considered offline.
 export const ONLINE_TTL_MS = 5 * 60 * 1000;
+
+export const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+export const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+export const PUBLIC_WEB_URL = process.env.PUBLIC_WEB_URL || "http://localhost:3000";

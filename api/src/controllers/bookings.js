@@ -4,6 +4,7 @@ import { effectivePrice } from "./services.js";
 
 const bookingInclude = {
   service: true,
+  payment: true,
   customer: {
     select: { id: true, name: true, email: true, phone: true, address: true },
   },
@@ -12,7 +13,10 @@ const bookingInclude = {
 // ---- Customer side ----
 
 export async function createBooking(req, res) {
-  const { serviceId, date, note } = req.body || {};
+  const { serviceId, date, note, paymentMethod = "cash" } = req.body || {};
+  if (!["cash", "online"].includes(paymentMethod)) {
+    return badRequest(res, "paymentMethod must be cash or online");
+  }
   if (!serviceId || !isDate(date)) {
     return badRequest(res, "serviceId and a valid date are required");
   }
@@ -32,6 +36,9 @@ export async function createBooking(req, res) {
       note: note || null,
       status: "pending",
       price,
+      payment: {
+        create: { method: paymentMethod, status: paymentMethod === "cash" ? "unpaid" : "pending", amount: price },
+      },
     },
     include: bookingInclude,
   });
@@ -53,7 +60,7 @@ export async function createBooking(req, res) {
     });
   }
 
-  res.status(201).json({ booking });
+  res.status(201).json({ booking, requiresCheckout: paymentMethod === "online" });
 }
 
 export async function deleteBooking(req, res) {

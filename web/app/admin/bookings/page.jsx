@@ -87,7 +87,7 @@ export default function AdminBookingsPage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Customer</th><th>Service</th><th>Date</th><th>Price</th><th>Note</th><th>Status</th><th className="text-right">Actions</th>
+                   <th>Customer</th><th>Service</th><th>Date</th><th>Total</th><th>Payment</th><th>Note</th><th>Status</th><th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -100,6 +100,14 @@ export default function AdminBookingsPage() {
                     <td>{b.service.name}</td>
                     <td className="text-muted">{fmtDate(b.date)}</td>
                     <td className="font-semibold">{money(b.price)}</td>
+                    <td className="text-xs">
+                      <div className="font-semibold capitalize">{b.payment?.method || "—"}</div>
+                      <div className={b.payment?.status === "paid" ? "text-clean" : "text-muted"}>{b.payment?.status || "—"}</div>
+                      {b.payment?.amountPaid > 0 && <div>{money(b.payment.amountPaid)} paid</div>}
+                      {b.payment?.paidAt && <div className="text-muted">{new Date(b.payment.paidAt).toLocaleString()}</div>}
+                      {b.payment?.stripeCheckoutSessionId && <div className="max-w-[130px] truncate text-muted" title={b.payment.stripeCheckoutSessionId}>{b.payment.stripeCheckoutSessionId}</div>}
+                      {b.payment?.stripePaymentIntentId && <div className="max-w-[130px] truncate text-muted" title={b.payment.stripePaymentIntentId}>{b.payment.stripePaymentIntentId}</div>}
+                    </td>
                     <td className="text-xs text-muted max-w-[180px] truncate">{b.note || "—"}</td>
                     <td><StatusBadge status={b.status} /></td>
                     <td className="text-right">

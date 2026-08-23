@@ -25,6 +25,7 @@ export default function ServicesPage() {
   const [selected, setSelected] = useState(null);
   const [date, setDate] = useState("");
   const [note, setNote] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
   const [busy, setBusy] = useState(false);
@@ -39,11 +40,17 @@ export default function ServicesPage() {
     setError("");
     setOk("");
     try {
-      await api("/bookings", { method: "POST", body: { serviceId: selected.id, date, note } });
+      const result = await api("/bookings", { method: "POST", body: { serviceId: selected.id, date, note, paymentMethod } });
+      if (paymentMethod === "online") {
+        const checkout = await api(`/bookings/${result.booking.id}/checkout`, { method: "POST" });
+        window.location.assign(checkout.url);
+        return;
+      }
       setOk("Booking requested! We'll confirm shortly.");
       setSelected(null);
       setDate("");
       setNote("");
+      setPaymentMethod("cash");
       setTimeout(() => router.push("/dashboard/bookings"), 1200);
     } catch (err) {
       setError(err.message);
@@ -111,8 +118,23 @@ export default function ServicesPage() {
                 <textarea className="textarea" value={note} onChange={(e) => setNote(e.target.value)}
                   placeholder="e.g. 12 windows, two stories, back door access" />
               </div>
+              <div>
+                <label className="label">Payment method</label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className={`cursor-pointer rounded-xl border px-4 py-3 ${paymentMethod === "online" ? "border-brand bg-brand-light" : "border-line"}`}>
+                    <input className="mr-2" type="radio" name="paymentMethod" value="online" checked={paymentMethod === "online"} onChange={(e) => setPaymentMethod(e.target.value)} />
+                    <span className="font-semibold text-ink">Pay online</span>
+                    <span className="block pl-6 text-xs text-muted">Secure Stripe Checkout</span>
+                  </label>
+                  <label className={`cursor-pointer rounded-xl border px-4 py-3 ${paymentMethod === "cash" ? "border-brand bg-brand-light" : "border-line"}`}>
+                    <input className="mr-2" type="radio" name="paymentMethod" value="cash" checked={paymentMethod === "cash"} onChange={(e) => setPaymentMethod(e.target.value)} />
+                    <span className="font-semibold text-ink">Pay with cash</span>
+                    <span className="block pl-6 text-xs text-muted">Pay after service</span>
+                  </label>
+                </div>
+              </div>
               <button className="btn btn-primary w-full !py-3" disabled={busy}>
-                {busy ? "Requesting…" : "Request booking"}
+                {busy ? "Requesting…" : paymentMethod === "online" ? "Continue to secure payment" : "Request booking"}
               </button>
             </form>
           </div>

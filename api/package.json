@@ -25,7 +25,8 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "pdfkit": "^0.15.2"
+    "pdfkit": "^0.15.2",
+    "stripe": "^22.5.0"
   },
   "devDependencies": {
     "prisma": "^5.22.0"

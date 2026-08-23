@@ -20,3 +20,9 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: PUBLIC_WEB_URL
+        value: https://web.trinitaso.com

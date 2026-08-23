@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import routes from "./routes/index.js";
 import { notFound, errorHandler } from "./middleware/error.js";
 import { COOKIE_SECURE } from "./config.js";
+import { stripeWebhook } from "./controllers/payments.js";
 
 const app = express();
 
@@ -17,6 +18,10 @@ app.use(
     credentials: true,
   })
 );
+
+// Stripe requires the untouched request bytes for webhook signature checks.
+app.post("/api/payments/webhook", express.raw({ type: "application/json" }), stripeWebhook);
+
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
