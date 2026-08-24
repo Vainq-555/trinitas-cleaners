@@ -40,5 +40,11 @@ jobs:
             exit 1
           fi
 
+      - name: Baseline pre-existing tables as init migration
+        # Production tables pre-date Prisma Migrate (created without it).
+        # Record the SQLite-era init migration as applied WITHOUT executing
+        # its SQL. Tolerated failure: the deploy step below is the gate.
+        run: npx prisma migrate resolve --applied 20260820184053_init || true
+
       - name: Apply Prisma migrations
         run: npx prisma migrate deploy
