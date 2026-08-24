@@ -65,10 +65,17 @@ export async function createBooking(req, res) {
 
 export async function deleteBooking(req, res) {
   const { id } = req.params;
-  const booking = await prisma.booking.findUnique({ where: { id } });
+  const booking = await prisma.booking.findUnique({ where: { id }, include: { payment: true } });
   if (!booking) return res.status(404).json({ error: "Booking not found" });
   if (booking.customerId !== req.user.id && req.user.role !== "admin") {
     return res.status(403).json({ error: "You can only delete your own bookings" });
+  }
+  // A paid booking must not be deleted: deleting it cascades to the Payment
+  // record, losing the record of collected funds without any refund flow.
+  if (req.user.role !== "admin" && booking.payment?.status === "paid") {
+    return res.status(403).json({
+      error: "This booking has already been paid and cannot be deleted. Contact us if you need to change or cancel it.",
+    });
   }
   await prisma.booking.delete({ where: { id } });
   res.json({ ok: true });

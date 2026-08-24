@@ -12,7 +12,9 @@ export async function createCheckout(req, res) {
   const booking = await prisma.booking.findUnique({ where: { id: req.params.id }, include: paymentInclude });
   if (!booking || booking.customerId !== req.user.id) return res.status(404).json({ error: "Booking not found" });
   if (!booking.payment || booking.payment.method !== "online") return badRequest(res, "This booking is not an online payment");
-  if (booking.payment.status === "paid") return badRequest(res, "This booking is already paid");
+  if (["paid", "refunded"].includes(booking.payment.status)) {
+    return badRequest(res, `This booking's payment is already ${booking.payment.status} and cannot be paid again`);
+  }
   if (booking.payment.stripeCheckoutSessionId) {
     const session = await stripe.checkout.sessions.retrieve(booking.payment.stripeCheckoutSessionId);
     if (session.status === "open") return res.json({ url: session.url });
@@ -46,7 +48,20 @@ async function processEvent(tx, event) {
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
     if (data.payment_status !== "paid" && event.type === "checkout.session.completed") return;
     const total = data.amount_total == null ? payment.amount : data.amount_total / 100;
-    if (Math.abs(total - payment.amount) > 0.01 || payment.status === "refunded") return;
+    if (Math.abs(total - payment.amount) > 0.01) {
+      const mismatch = new Error("Stripe webhook amount does not match stored Payment.amount");
+      mismatch.code = "PAYMENT_AMOUNT_MISMATCH";
+      mismatch.details = {
+        eventId: event.id,
+        eventType: event.type,
+        bookingId: payment.bookingId,
+        paymentId: payment.id,
+        expectedAmount: payment.amount,
+        receivedAmount: total,
+      };
+      throw mismatch;
+    }
+    if (payment.status === "refunded") return;
     await tx.payment.update({ where: { id: payment.id }, data: { status: "paid", amountPaid: total, paidAt: new Date(), stripePaymentIntentId: typeof data.payment_intent === "string" ? data.payment_intent : payment.stripePaymentIntentId } });
   } else if (event.type === "checkout.session.expired") {
     if (payment.status !== "paid" && payment.status !== "refunded") await tx.payment.update({ where: { id: payment.id }, data: { status: "cancelled" } });
@@ -69,6 +84,10 @@ export async function stripeWebhook(req, res) {
     });
   } catch (error) {
     if (error.code === "P2002" && error.meta?.target?.includes("eventId")) return res.json({ received: true, duplicate: true });
+    if (error.code === "PAYMENT_AMOUNT_MISMATCH") {
+      console.error("Stripe webhook amount mismatch — payment left unchanged", error.details);
+      return res.status(409).json({ error: "Payment amount mismatch; event not applied" });
+    }
     console.error("Stripe webhook processing failed", error);
     return res.status(500).json({ error: "Webhook processing failed" });
   }
