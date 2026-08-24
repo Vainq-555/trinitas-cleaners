@@ -1,0 +1,44 @@
+name: Apply Prisma migration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-prisma-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.SUPABASE_DIRECT_URL }}
+      DIRECT_URL: ${{ secrets.SUPABASE_DIRECT_URL }}
+      PRISMA_HIDE_UPDATE_MESSAGE: "1"
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - name: Check out migration revision
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install API dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Verify migration secret is configured
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$DIRECT_URL" ]; then
+            echo "::error::Repository secret SUPABASE_DIRECT_URL is not set"
+            exit 1
+          fi
+
+      - name: Apply Prisma migrations
+        run: npx prisma migrate deploy
