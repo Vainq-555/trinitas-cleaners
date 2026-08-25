@@ -77,25 +77,44 @@ export function buildReceiptPdf(receipt, customer, service, booking) {
       );
     }
 
+    const authoritative = Number.isInteger(receipt.finalAmountCents);
+    const base = authoritative ? receipt.baseAmountCents : receipt.subtotal;
+    const taxableSubtotal = authoritative ? receipt.taxableSubtotalCents : receipt.subtotal;
+    const discount = authoritative ? receipt.discountCents : receipt.discount;
+    const tax = authoritative ? receipt.taxCents : receipt.tax;
+    const total = authoritative ? receipt.finalAmountCents : receipt.total;
+
     // Price columns
     doc.fillColor(ink).fontSize(10);
-    doc.text("Subtotal", doc.page.width - 48 - 80, doc.y - 20, { width: 80, align: "right" });
-    doc.text(formatMoney(receipt.subtotal), doc.page.width - 48 - 80, doc.y + 2, {
+    doc.text(authoritative ? "Service price" : "Subtotal", doc.page.width - 48 - 80, doc.y - 20, { width: 80, align: "right" });
+    doc.text(authoritative ? formatMoneyCents(base) : formatMoney(base), doc.page.width - 48 - 80, doc.y + 2, {
       width: 80,
       align: "right",
     });
 
-    doc.moveDown(0.8);
-    doc.fillColor(ink).fontSize(10).text(`Tax (${(receipt.taxRate * 100).toFixed(2)}%)`);
-    doc.text(formatMoney(receipt.tax), doc.page.width - 48 - 80, doc.y - 14, {
-      width: 80,
-      align: "right",
-    });
-
-    if (receipt.discount > 0) {
+    if (authoritative) {
       doc.moveDown(0.6);
       doc.fillColor(ink).text("Discount");
-      doc.text(`- ${formatMoney(receipt.discount)}`, doc.page.width - 48 - 80, doc.y - 14, {
+      doc.text(`- ${formatMoneyCents(discount)}`, doc.page.width - 48 - 80, doc.y - 14, { width: 80, align: "right" });
+      doc.moveDown(0.6);
+      doc.fillColor(ink).text("Taxable subtotal");
+      doc.text(formatMoneyCents(taxableSubtotal), doc.page.width - 48 - 80, doc.y - 14, { width: 80, align: "right" });
+    }
+
+    doc.moveDown(0.8);
+    const taxLabel = authoritative && Number.isInteger(receipt.taxRateBasisPoints)
+      ? `Tax (${(receipt.taxRateBasisPoints / 100).toFixed(2)}%)`
+      : `Tax (${(receipt.taxRate * 100).toFixed(2)}%)`;
+    doc.fillColor(ink).fontSize(10).text(taxLabel);
+    doc.text(authoritative ? formatMoneyCents(tax) : formatMoney(tax), doc.page.width - 48 - 80, doc.y - 14, {
+      width: 80,
+      align: "right",
+    });
+
+    if (!authoritative && discount > 0) {
+      doc.moveDown(0.6);
+      doc.fillColor(ink).text("Discount");
+      doc.text(`- ${formatMoney(discount)}`, doc.page.width - 48 - 80, doc.y - 14, {
         width: 80,
         align: "right",
       });
@@ -111,7 +130,7 @@ export function buildReceiptPdf(receipt, customer, service, booking) {
     doc.moveTo(48, doc.y).lineTo(doc.page.width - 48, doc.y).strokeColor("#d1d5db").stroke();
     doc.moveDown(0.5);
     doc.fontSize(13).fillColor(accent).text("TOTAL", { continued: true });
-    doc.text(formatMoney(receipt.total), { align: "right", width: doc.page.width - 96 });
+    doc.text(authoritative ? formatMoneyCents(total) : formatMoney(total), { align: "right", width: doc.page.width - 96 });
     doc.moveDown(0.5);
     doc
       .moveTo(48, doc.y)
@@ -134,4 +153,8 @@ export function buildReceiptPdf(receipt, customer, service, booking) {
 
 export function formatMoney(n) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+export function formatMoneyCents(cents) {
+  return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
 }

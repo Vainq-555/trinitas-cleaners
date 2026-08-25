@@ -7,7 +7,7 @@ import {
   Download, Eye, ReceiptIndianRupee,
 } from "lucide-react";
 import Shell from "@/components/Shell";
-import { api, fmtDate, money } from "@/lib/api";
+import { api, fmtDate, money, moneyCents } from "@/lib/api";
 
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
@@ -48,7 +48,7 @@ export default function ReceiptsPage() {
                 <span className="text-xs text-muted">{fmtDate(r.createdAt)}</span>
               </div>
               <p className="mt-3 font-semibold text-ink">{r.booking?.service?.name || "Custom charge"}</p>
-              <p className="mt-3 text-2xl font-extrabold text-brand">{money(r.total)}</p>
+               <p className="mt-3 text-2xl font-extrabold text-brand">{Number.isInteger(r.finalAmountCents) ? moneyCents(r.finalAmountCents) : money(r.total)}</p>
               <div className="mt-4 pt-4 border-t border-line flex gap-2">
                 <Link href={`/dashboard/receipts/${r.id}`} className="btn btn-outline btn-sm flex-1">
                   <Eye size={14} /> View

@@ -14,6 +14,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -49,6 +50,7 @@ model Service {
 
   bookings     Booking[]
   customPrices CustomPrice[]
+  promotions   PromotionService[]
 }
 
 // Per-customer price override. Existence of a row overrides basePrice for
@@ -76,12 +78,35 @@ model Booking {
   price      Float // price quoted at booking time (after any override)
   createdAt  DateTime @default(now())
 
+  // Additive cents snapshot. Legacy Float fields remain unchanged.
+  basePriceCents                 Int?
+  discountCents                  Int?
+  taxableSubtotalCents           Int?
+  taxRateBasisPoints             Int?
+  taxCents                       Int?
+  finalAmountCents               Int?
+  taxCalculationId               String?
+  taxAddressLine1                String?
+  taxAddressLine2                String?
+  taxAddressCity                 String?
+  taxAddressState                String?
+  taxAddressPostalCode           String?
+  taxAddressCountry              String?
+  promotionId                    String?
+  promotionCodeSnapshot          String?
+  promotionNameSnapshot          String?
+  promotionDiscountTypeSnapshot  String?
+  promotionDiscountValueSnapshot Int?
+  promotionUsageClaimedAt        DateTime?
+
   customer User      @relation(fields: [customerId], references: [id], onDelete: Cascade)
   service  Service   @relation(fields: [serviceId], references: [id])
   receipts Receipt[]
-  payment  Payment?
+  payment   Payment?
+  promotion Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
 
   @@index([customerId])
+  @@index([promotionId])
   @@index([status])
 }
 
@@ -100,6 +125,10 @@ model Payment {
   refundedAt              DateTime?
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
+
+  // Authoritative amount for new checkout records. Legacy Float fields remain.
+  finalAmountCents        Int?
+  amountPaidCents         Int?
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
@@ -127,10 +156,50 @@ model Receipt {
   pdfUrl     String?
   createdAt  DateTime @default(now())
 
+  // Authoritative snapshot for receipts created from the new payment path.
+  baseAmountCents      Int?
+  discountCents        Int?
+  taxableSubtotalCents Int?
+  taxRateBasisPoints   Int?
+  taxCents             Int?
+  finalAmountCents     Int?
+
   customer User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
   booking  Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
 
   @@index([customerId])
+}
+
+model Promotion {
+  id               String   @id @default(cuid())
+  code             String?  @unique
+  name             String
+  description      String?
+  discountType     String   // "percentage" or "fixed"
+  discountValue    Int      // basis points for percentage, cents for fixed
+  startsAt         DateTime?
+  endsAt           DateTime?
+  active           Boolean  @default(true)
+  minSubtotalCents Int?
+  priority         Int      @default(0)
+  maxUses          Int?
+  usageCount       Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  services PromotionService[]
+  bookings Booking[]
+}
+
+model PromotionService {
+  promotionId String
+  serviceId   String
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  service   Service   @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, serviceId])
+  @@index([serviceId])
 }
 
 model Message {

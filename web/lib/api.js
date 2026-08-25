@@ -35,6 +35,9 @@ export async function api(path, { method = "GET", body, headers = {} } = {}) {
 export const money = (n) =>
   (Number(n) || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
 
+export const moneyCents = (cents) =>
+  (Number.isInteger(cents) ? cents / 100 : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
+
 export const fmtDate = (iso) =>
   new Date(iso).toLocaleDateString("en-US", {
     weekday: "short",

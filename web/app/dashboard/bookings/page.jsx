@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import StatusBadge from "@/components/StatusBadge";
-import { api, fmtDate, money } from "@/lib/api";
+import { api, fmtDate, money, moneyCents } from "@/lib/api";
 
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
@@ -27,6 +27,10 @@ export default function BookingsPage() {
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState(null);
   const [paying, setPaying] = useState(null);
+  const [quote, setQuote] = useState(null);
+  const [addressRequired, setAddressRequired] = useState(false);
+  const [addressBookingId, setAddressBookingId] = useState(null);
+  const [serviceAddress, setServiceAddress] = useState({ line1: "", city: "", state: "", postalCode: "", country: "US" });
 
   const load = () =>
     api("/bookings").then((d) => setBookings(d.bookings)).finally(() => setLoading(false));
@@ -58,10 +62,39 @@ export default function BookingsPage() {
     }
   }, []);
 
-  const pay = async (id) => {
+  const requestQuote = async (id, address) => {
     setPaying(id);
     try {
-      const { url } = await api(`/bookings/${id}/checkout`, { method: "POST" });
+      const preview = await api(`/bookings/${id}/checkout`, { method: "POST", body: address ? { serviceAddress: address } : undefined });
+      setQuote({ bookingId: id, ...preview.quote });
+      setAddressRequired(false);
+      setAddressBookingId(null);
+    } catch (e) {
+      if (e.data?.requiresAddress) {
+        setAddressRequired(true);
+        setAddressBookingId(id);
+      }
+      else alert(e.message);
+      setPaying(null);
+    }
+  };
+
+  const pay = (id) => requestQuote(id);
+
+  const submitAddress = (event) => {
+    event.preventDefault();
+    const id = addressBookingId;
+    if (id) requestQuote(id, serviceAddress);
+  };
+
+  const approveQuote = async () => {
+    if (!quote) return;
+    setPaying(quote.bookingId);
+    try {
+      const { url } = await api(`/bookings/${quote.bookingId}/checkout`, {
+        method: "POST",
+        body: { confirm: true, approvedFinalAmountCents: quote.finalAmountCents },
+      });
       window.location.assign(url);
     } catch (e) {
       alert(e.message);
@@ -85,6 +118,31 @@ export default function BookingsPage() {
     <Shell links={links} sections={["Customer Portal"]} title="My Bookings"
       subtitle="View history, track status, or cancel a pending booking.">
       {banner && <div className={banner.kind === "ok" ? "form-ok" : "form-error"}>{banner.text}</div>}
+      {addressRequired && (
+        <form className="card card-pad mb-6 max-w-lg border-2 border-brand" onSubmit={submitAddress}>
+          <h2 className="text-lg font-bold text-ink">Confirm service address</h2>
+          <p className="mt-1 text-sm text-muted">A complete service address is required to calculate the current tax before payment.</p>
+          <div className="mt-4 space-y-2">
+            <input className="input" required placeholder="Street address" value={serviceAddress.line1} onChange={(e) => setServiceAddress({ ...serviceAddress, line1: e.target.value })} />
+            <div className="grid grid-cols-2 gap-2"><input className="input" required placeholder="City" value={serviceAddress.city} onChange={(e) => setServiceAddress({ ...serviceAddress, city: e.target.value })} /><input className="input" required placeholder="State" maxLength="2" value={serviceAddress.state} onChange={(e) => setServiceAddress({ ...serviceAddress, state: e.target.value })} /></div>
+            <input className="input" required placeholder="ZIP code" value={serviceAddress.postalCode} onChange={(e) => setServiceAddress({ ...serviceAddress, postalCode: e.target.value })} />
+          </div>
+          <button className="btn btn-primary mt-4" disabled={!addressBookingId || paying !== null}>Calculate tax and review total</button>
+        </form>
+      )}
+      {quote && (
+        <div className="card card-pad mb-6 max-w-lg border-2 border-brand">
+          <h2 className="text-lg font-bold text-ink">Confirm payment amount</h2>
+          <div className="mt-4 space-y-2 text-sm">
+            <div className="flex justify-between"><span>Service price</span><span>{moneyCents(quote.basePriceCents)}</span></div>
+            <div className="flex justify-between text-clean"><span>Discount</span><span>− {moneyCents(quote.discountCents)}</span></div>
+            <div className="flex justify-between border-t border-line pt-2"><span>Taxable subtotal</span><span>{moneyCents(quote.taxableSubtotalCents)}</span></div>
+            <div className="flex justify-between"><span>Sales tax</span><span>{moneyCents(quote.taxCents)}</span></div>
+            <div className="flex justify-between border-t-2 border-ink pt-3 text-lg font-extrabold"><span>FINAL TOTAL</span><span>{moneyCents(quote.finalAmountCents)}</span></div>
+          </div>
+          <div className="mt-5 flex gap-2"><button className="btn btn-primary" disabled={paying === quote.bookingId} onClick={approveQuote}>{paying === quote.bookingId ? "Opening checkout…" : `Pay ${moneyCents(quote.finalAmountCents)}`}</button><button className="btn btn-outline" onClick={() => { setQuote(null); setPaying(null); }}>Cancel</button></div>
+        </div>
+      )}
       <div className="flex flex-wrap gap-2 mb-6">
         {filters.map((s) => (
           <button key={s} className={`tab-btn ${filter === s ? "tab-btn-active" : ""}`} onClick={() => setFilter(s)}>
@@ -118,7 +176,7 @@ export default function BookingsPage() {
                     <td className="font-semibold">{b.service.name}</td>
                     <td className="text-muted">{fmtDate(b.date)}</td>
                     <td><StatusBadge status={b.status} /></td>
-                    <td className="font-semibold">{money(b.price)}</td>
+                    <td className="font-semibold">{Number.isInteger(b.finalAmountCents) ? moneyCents(b.finalAmountCents) : money(b.price)}</td>
                     <td className="text-xs">
                       <div className="font-semibold capitalize">{b.payment?.method || "—"}</div>
                       <div className={b.payment?.status === "paid" ? "text-clean" : "text-muted"}>{b.payment?.status || "—"}</div>

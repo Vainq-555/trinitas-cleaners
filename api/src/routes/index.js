@@ -9,6 +9,7 @@ import * as messages from "../controllers/messages.js";
 import * as broadcasts from "../controllers/broadcasts.js";
 import * as users from "../controllers/users.js";
 import * as payments from "../controllers/payments.js";
+import * as promotions from "../controllers/promotions.js";
 
 const router = Router();
 
@@ -59,6 +60,10 @@ router.put("/admin/services/:id", adminOnly, services.adminUpdateService);
 router.put("/admin/services/:id/price/global", adminOnly, services.adminSetGlobalPrice);
 router.put("/admin/services/:id/price/customer", adminOnly, services.adminSetCustomerPrice);
 router.delete("/admin/services/:id/price/customer", adminOnly, services.adminClearCustomerPrice);
+
+router.get("/admin/promotions", adminOnly, promotions.adminListPromotions);
+router.post("/admin/promotions", adminOnly, promotions.adminCreatePromotion);
+router.patch("/admin/promotions/:id", adminOnly, promotions.adminUpdatePromotion);
 
 router.get("/admin/receipts", adminOnly, receipts.adminListReceipts);
 router.post("/admin/receipts", adminOnly, receipts.adminCreateReceipt);

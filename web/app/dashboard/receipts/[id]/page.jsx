@@ -7,7 +7,7 @@ import {
   Printer, Download, ArrowLeft, Sparkles as SparkleIcon,
 } from "lucide-react";
 import Shell from "@/components/Shell";
-import { api, fmtDate, fmtDateTime, money } from "@/lib/api";
+import { api, fmtDate, fmtDateTime, money, moneyCents } from "@/lib/api";
 
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
@@ -90,18 +90,24 @@ export default function ReceiptDetailPage({ params }) {
           <div className="mt-3">
             <div className="flex items-center justify-between py-2">
               <span className="font-semibold text-ink">{receipt.booking?.service?.name || "Custom charge"}</span>
-              <span className="font-semibold">{money(receipt.subtotal)}</span>
+               <span className="font-semibold">{Number.isInteger(receipt.baseAmountCents) ? moneyCents(receipt.baseAmountCents) : money(receipt.subtotal)}</span>
             </div>
             {receipt.booking && (
               <div className="text-xs text-muted">
                 Booking #{receipt.booking.id.slice(0, 8).toUpperCase()} · {fmtDate(receipt.booking.date)}
               </div>
             )}
+            {Number.isInteger(receipt.baseAmountCents) && (
+              <>
+                <div className="flex items-center justify-between py-2 border-t border-dashed border-line"><span className="text-sm text-clean">Discount</span><span className="text-sm text-clean">− {moneyCents(receipt.discountCents)}</span></div>
+                <div className="flex items-center justify-between py-2 border-t border-dashed border-line"><span className="text-sm text-ink">Taxable subtotal</span><span className="text-sm">{moneyCents(receipt.taxableSubtotalCents)}</span></div>
+              </>
+            )}
             <div className="flex items-center justify-between py-2 border-t border-dashed border-line">
-              <span className="text-sm text-ink">Tax ({(receipt.taxRate * 100).toFixed(2)}%)</span>
-              <span className="text-sm">{money(receipt.tax)}</span>
+              <span className="text-sm text-ink">Tax {Number.isInteger(receipt.taxRateBasisPoints) ? `(${(receipt.taxRateBasisPoints / 100).toFixed(2)}%)` : `(${(receipt.taxRate * 100).toFixed(2)}%)`}</span>
+              <span className="text-sm">{Number.isInteger(receipt.taxCents) ? moneyCents(receipt.taxCents) : money(receipt.tax)}</span>
             </div>
-            {receipt.discount > 0 && (
+            {!Number.isInteger(receipt.baseAmountCents) && receipt.discount > 0 && (
               <div className="flex items-center justify-between py-2 border-t border-dashed border-line">
                 <span className="text-sm text-clean">Discount</span>
                 <span className="text-sm text-clean">− {money(receipt.discount)}</span>
@@ -112,7 +118,7 @@ export default function ReceiptDetailPage({ params }) {
           {/* Total */}
           <div className="mt-5 flex items-center justify-between border-t-2 border-ink pt-4">
             <span className="text-lg font-extrabold text-ink">TOTAL</span>
-            <span className="text-2xl font-extrabold text-brand">{money(receipt.total)}</span>
+             <span className="text-2xl font-extrabold text-brand">{Number.isInteger(receipt.finalAmountCents) ? moneyCents(receipt.finalAmountCents) : money(receipt.total)}</span>
           </div>
 
           {receipt.note && (

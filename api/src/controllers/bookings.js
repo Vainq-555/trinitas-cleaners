@@ -1,6 +1,10 @@
 import prisma from "../utils/prisma.js";
 import { badRequest, isDate, isValidBookingStatus } from "../utils/validators.js";
 import { effectivePrice } from "./services.js";
+import { dollarsToCents } from "../utils/money.js";
+import { calculatePreTaxQuote } from "../utils/promotions.js";
+import { promotionSnapshot } from "../utils/pricing.js";
+import { claimPromotionUsage } from "../utils/promotionUsage.js";
 
 const bookingInclude = {
   service: true,
@@ -13,7 +17,7 @@ const bookingInclude = {
 // ---- Customer side ----
 
 export async function createBooking(req, res) {
-  const { serviceId, date, note, paymentMethod = "cash" } = req.body || {};
+  const { serviceId, date, note, paymentMethod = "cash", promoCode, serviceAddress } = req.body || {};
   if (!["cash", "online"].includes(paymentMethod)) {
     return badRequest(res, "paymentMethod must be cash or online");
   }
@@ -28,20 +32,54 @@ export async function createBooking(req, res) {
   if (!service) return badRequest(res, "Service not found");
 
   const price = await effectivePrice(service, req.user.id);
-  const booking = await prisma.booking.create({
-    data: {
-      customerId: req.user.id,
-      serviceId: service.id,
-      date: new Date(date),
-      note: note || null,
-      status: "pending",
-      price,
-      payment: {
-        create: { method: paymentMethod, status: paymentMethod === "cash" ? "unpaid" : "pending", amount: price },
-      },
-    },
-    include: bookingInclude,
+  let basePriceCents;
+  try {
+    basePriceCents = dollarsToCents(price);
+  } catch {
+    return badRequest(res, "This service has an invalid price and cannot be booked online");
+  }
+  const promotions = await prisma.promotion.findMany({
+    where: { OR: [{ services: { none: {} } }, { services: { some: { serviceId: service.id } } }] },
+    include: { services: true },
   });
+  const preTaxQuote = calculatePreTaxQuote({ basePriceCents, promotions, serviceId: service.id, promoCode });
+  if (promoCode && !preTaxQuote.promotion) return badRequest(res, "That promotion code is invalid or unavailable");
+  const address = serviceAddress || {};
+  const snapshot = promotionSnapshot(preTaxQuote);
+  let booking;
+  try {
+    booking = await prisma.$transaction(async (tx) => {
+      const created = await tx.booking.create({
+        data: {
+          customerId: req.user.id,
+          serviceId: service.id,
+          date: new Date(date),
+          note: note || null,
+          status: "pending",
+          price,
+          basePriceCents: preTaxQuote.basePriceCents,
+          discountCents: preTaxQuote.discountCents,
+          taxableSubtotalCents: preTaxQuote.taxableSubtotalCents,
+          ...snapshot,
+          taxAddressLine1: typeof address.line1 === "string" ? address.line1.trim() : null,
+          taxAddressLine2: typeof address.line2 === "string" ? address.line2.trim() || null : null,
+          taxAddressCity: typeof address.city === "string" ? address.city.trim() : null,
+          taxAddressState: typeof address.state === "string" ? address.state.trim() : null,
+          taxAddressPostalCode: typeof address.postalCode === "string" ? address.postalCode.trim() : null,
+          taxAddressCountry: typeof address.country === "string" ? address.country.trim() : null,
+          payment: {
+            create: { method: paymentMethod, status: paymentMethod === "cash" ? "unpaid" : "pending", amount: price },
+          },
+        },
+        include: bookingInclude,
+      });
+      if (preTaxQuote.promotion) await claimPromotionUsage(tx, created);
+      return created;
+    });
+  } catch (error) {
+    if (error.code === "PROMOTION_UNAVAILABLE") return badRequest(res, error.message);
+    throw error;
+  }
 
   // Notify the admin of the new booking.
   const admin = await prisma.user.findFirst({ where: { role: "admin" } });
