@@ -11,6 +11,18 @@ import { claimPromotionUsage } from "../utils/promotionUsage.js";
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 const paymentInclude = { service: true, customer: { select: { name: true, email: true } }, payment: true };
 
+function addressDiagnostics(address) {
+  const fields = ["line1", "city", "state", "postalCode", "country"];
+  return {
+    present: Boolean(address),
+    fields: Object.fromEntries(fields.map((field) => [field, {
+      type: typeof address?.[field],
+      nonEmpty: typeof address?.[field] === "string" && Boolean(address[field].trim()),
+      length: typeof address?.[field] === "string" ? address[field].trim().length : 0,
+    }])),
+  };
+}
+
 export function assertPaidAmountMatches(expectedCents, receivedCents) {
   if (!Number.isInteger(expectedCents) || !Number.isInteger(receivedCents) || receivedCents !== expectedCents) {
     const mismatch = new Error("Stripe webhook amount does not match stored final amount");
@@ -102,10 +114,12 @@ async function saveQuote(booking, quote) {
 
 export async function createCheckout(req, res) {
   const { confirm = false, approvedFinalAmountCents, serviceAddress } = req.body || {};
+  console.info("Checkout service address received", addressDiagnostics(serviceAddress));
   const booking = await prisma.booking.findUnique({ where: { id: req.params.id }, include: paymentInclude });
   if (!booking || booking.customerId !== req.user.id) return res.status(404).json({ error: "Booking not found" });
   if (!booking.payment || booking.payment.method !== "online") return badRequest(res, "This booking is not an online payment");
   if (["paid", "refunded"].includes(booking.payment.status)) return badRequest(res, `This booking's payment is already ${booking.payment.status} and cannot be paid again`);
+  console.info("Checkout stored service address", addressDiagnostics(bookingAddress(booking)));
 
   let quote;
   try {
