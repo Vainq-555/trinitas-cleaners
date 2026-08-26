@@ -242,7 +242,10 @@ async function processEvent(tx, event) {
     if (payment.status === "refunded") return;
     const updated = await tx.payment.update({ where: { id: payment.id }, data: { status: "paid", amountPaidCents: receivedCents, amountPaid: centsToLegacyDollars(receivedCents), paidAt: new Date(), stripePaymentIntentId: typeof data.payment_intent === "string" ? data.payment_intent : payment.stripePaymentIntentId } });
     const booking = await tx.booking.findUnique({ where: { id: payment.bookingId } });
-    if (booking) await createSnapshotReceipt(tx, booking, updated);
+    if (booking) {
+      if (booking.status === "pending") await tx.booking.update({ where: { id: booking.id }, data: { status: "accepted" } });
+      await createSnapshotReceipt(tx, booking, updated);
+    }
   } else if (event.type === "checkout.session.expired") {
     if (payment.status !== "paid" && payment.status !== "refunded") await tx.payment.update({ where: { id: payment.id }, data: { status: "cancelled" } });
   } else if (event.type === "payment_intent.payment_failed" || event.type === "checkout.session.async_payment_failed") {
@@ -253,10 +256,17 @@ async function processEvent(tx, event) {
 }
 
 export async function stripeWebhook(req, res) {
-  if (!stripe || !STRIPE_WEBHOOK_SECRET) return res.status(503).json({ error: "Stripe webhook is not configured" });
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) {
+    console.error("Stripe webhook received but not configured", { hasStripe: Boolean(stripe), hasSecret: Boolean(STRIPE_WEBHOOK_SECRET) });
+    return res.status(503).json({ error: "Stripe webhook is not configured" });
+  }
   let event;
   try { event = stripe.webhooks.constructEvent(req.body, req.headers["stripe-signature"], STRIPE_WEBHOOK_SECRET); }
-  catch (error) { return res.status(400).json({ error: `Webhook signature verification failed: ${error.message}` }); }
+  catch (error) {
+    console.error("Stripe webhook signature verification failed", { message: error.message });
+    return res.status(400).json({ error: `Webhook signature verification failed: ${error.message}` });
+  }
+  console.info("Stripe webhook received", { eventType: event.type, eventId: event.id });
   try {
     await prisma.$transaction(async (tx) => {
       await tx.stripeWebhookEvent.create({ data: { eventId: event.id, eventType: event.type } });
