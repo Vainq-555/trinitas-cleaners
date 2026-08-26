@@ -105,6 +105,22 @@ test("calculateStripeTax rejects address already normalized by validateTaxAddres
   );
 });
 
+test("stripe_tax_inactive surfaces Stripe activation message and is not retryable", async () => {
+  const stripeInactiveError = Object.assign(
+    new Error("Stripe Tax has not been activated on your account. Please visit https://dashboard.stripe.com/test/tax to get started."),
+    { code: "stripe_tax_inactive" },
+  );
+  const stripe = { tax: { calculations: { create: async () => { throw stripeInactiveError; } } } };
+  try {
+    await calculateStripeTax({ stripe, amountCents: 100, serviceId: "s1", address });
+    assert.fail("should have thrown");
+  } catch (error) {
+    assert.ok(error instanceof TaxUnavailableError);
+    assert.ok(error.message.includes("Stripe Tax has not been activated"));
+    assert.equal(error.retryable, false);
+  }
+});
+
 test("webhook amount mismatch is rejected in cents", () => {
   assert.doesNotThrow(() => assertPaidAmountMatches(3853, 3853));
   assert.throws(() => assertPaidAmountMatches(3853, 3852), (error) => error.code === "PAYMENT_AMOUNT_MISMATCH");

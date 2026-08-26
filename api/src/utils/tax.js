@@ -50,16 +50,23 @@ export async function calculateStripeTax({ stripe, amountCents, serviceId, addre
       customer_details: { address: taxAddress, address_source: "shipping" },
     });
   } catch (error) {
+    const safeMessage = String(error?.message || "Unknown Stripe error")
+      .replace(/[^\x20-\x7E]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 200);
     console.error("Stripe Tax calculation failed", {
       type: error?.type ?? null,
       code: error?.code ?? null,
       httpStatus: error?.statusCode ?? error?.status ?? null,
       requestId: error?.requestId ?? error?.request_id ?? null,
-      message: String(error?.message || "Unknown Stripe error")
-        .replace(/[^\x20-\x7E]/g, "")
-        .replace(/\s+/g, " ")
-        .slice(0, 200),
+      message: safeMessage,
     });
+    if (error?.code === "stripe_tax_inactive") {
+      const err = new TaxUnavailableError(safeMessage || "Stripe Tax is not activated. Please enable it in the Stripe dashboard.");
+      err.retryable = false;
+      throw err;
+    }
     throw new TaxUnavailableError();
   }
   if (!Number.isInteger(calculation.tax_amount_exclusive) || calculation.tax_amount_exclusive < 0) throw new TaxUnavailableError();

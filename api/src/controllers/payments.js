@@ -142,7 +142,7 @@ export async function createCheckout(req, res) {
     if (error instanceof TaxAddressRequiredError || error.code === "TAX_ADDRESS_REQUIRED") {
       return res.status(422).json({ error: error.message, code: "TAX_ADDRESS_REQUIRED", requiresAddress: true });
     }
-    if (error instanceof TaxUnavailableError || error.code === "TAX_UNAVAILABLE") return res.status(503).json({ error: error.message, retryable: true });
+    if (error instanceof TaxUnavailableError || error.code === "TAX_UNAVAILABLE") return res.status(503).json({ error: error.message, retryable: error.retryable !== false });
     if (error.message?.includes("Money value")) return res.status(409).json({ error: "This legacy booking cannot be safely repriced" });
     console.error("Checkout quote failed", error);
     return res.status(500).json({ error: "Unable to prepare checkout" });
