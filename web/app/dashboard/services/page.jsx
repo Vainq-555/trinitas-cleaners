@@ -45,8 +45,8 @@ export default function ServicesPage() {
     try {
       const result = await api("/bookings", { method: "POST", body: { serviceId: selected.id, date, note, paymentMethod, promoCode: promoCode.trim() || undefined, serviceAddress: address } });
       if (paymentMethod === "online") {
-        const preview = await api(`/bookings/${result.booking.id}/checkout`, { method: "POST" });
-        setQuote({ bookingId: result.booking.id, ...preview.quote });
+        const preview = await api(`/bookings/${result.booking.id}/checkout`, { method: "POST", body: { serviceAddress: address } });
+        setQuote({ bookingId: result.booking.id, serviceAddress: address, ...preview.quote });
         return;
       }
       setOk("Booking requested! We'll confirm shortly.");
@@ -67,7 +67,7 @@ export default function ServicesPage() {
     setBusy(true);
     setError("");
     try {
-      const checkout = await api(`/bookings/${quote.bookingId}/checkout`, { method: "POST", body: { confirm: true, approvedFinalAmountCents: quote.finalAmountCents } });
+      const checkout = await api(`/bookings/${quote.bookingId}/checkout`, { method: "POST", body: { confirm: true, approvedFinalAmountCents: quote.finalAmountCents, serviceAddress: quote.serviceAddress } });
       window.location.assign(checkout.url);
     } catch (err) {
       setError(err.message);

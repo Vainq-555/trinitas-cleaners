@@ -66,7 +66,7 @@ export default function BookingsPage() {
     setPaying(id);
     try {
       const preview = await api(`/bookings/${id}/checkout`, { method: "POST", body: address ? { serviceAddress: address } : undefined });
-      setQuote({ bookingId: id, ...preview.quote });
+      setQuote({ bookingId: id, serviceAddress: address, ...preview.quote });
       setAddressRequired(false);
       setAddressBookingId(null);
     } catch (e) {
@@ -93,7 +93,7 @@ export default function BookingsPage() {
     try {
       const { url } = await api(`/bookings/${quote.bookingId}/checkout`, {
         method: "POST",
-        body: { confirm: true, approvedFinalAmountCents: quote.finalAmountCents },
+        body: { confirm: true, approvedFinalAmountCents: quote.finalAmountCents, serviceAddress: quote.serviceAddress },
       });
       window.location.assign(url);
     } catch (e) {
