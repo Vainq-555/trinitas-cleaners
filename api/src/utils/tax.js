@@ -41,24 +41,15 @@ export async function calculateStripeTax({ stripe, amountCents, serviceId, addre
   if (!Number.isInteger(amountCents) || amountCents < 0) throw new TaxUnavailableError();
   const client = stripe || (STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null);
   if (!client) throw new TaxUnavailableError();
+  const taxAddress = validateTaxAddress(address);
   let calculation;
   try {
     calculation = await client.tax.calculations.create({
       currency: "usd",
       line_items: [{ amount: amountCents, reference: serviceId, tax_behavior: "exclusive" }],
-      customer_details: { address: validateTaxAddress(address), address_source: "shipping" },
+      customer_details: { address: taxAddress, address_source: "shipping" },
     });
-  } catch (error) {
-    console.error("Stripe Tax calculation failed", {
-      type: error?.type ?? null,
-      code: error?.code ?? null,
-      httpStatus: error?.statusCode ?? error?.status ?? null,
-      requestId: error?.requestId ?? error?.request_id ?? null,
-      message: String(error?.message || "Unknown Stripe error")
-        .replace(/[^\x20-\x7E]/g, "")
-        .replace(/\s+/g, " ")
-        .slice(0, 200),
-    });
+  } catch {
     throw new TaxUnavailableError();
   }
   if (!Number.isInteger(calculation.tax_amount_exclusive) || calculation.tax_amount_exclusive < 0) throw new TaxUnavailableError();

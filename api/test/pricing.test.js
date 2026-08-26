@@ -91,6 +91,7 @@ test("Stripe Tax uses service address and exclusive cents amount", async () => {
 
 test("tax provider failure and incomplete address fail safely", async () => {
   await assert.rejects(() => calculateStripeTax({ stripe: { tax: { calculations: { create: async () => { throw new Error("unavailable"); } } } }, amountCents: 100, serviceId: "s1", address }), TaxUnavailableError);
+  await assert.rejects(() => calculateStripeTax({ stripe: { tax: { calculations: { create: async () => { throw new Error("must not be called"); } } } }, amountCents: 100, serviceId: "s1", address: {} }), TaxAddressRequiredError);
   assert.throws(() => validateTaxAddress({}), TaxAddressRequiredError);
 });
 
