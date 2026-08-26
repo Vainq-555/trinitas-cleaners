@@ -95,6 +95,16 @@ test("tax provider failure and incomplete address fail safely", async () => {
   assert.throws(() => validateTaxAddress({}), TaxAddressRequiredError);
 });
 
+test("calculateStripeTax rejects address already normalized by validateTaxAddress", async () => {
+  const normalized = validateTaxAddress(address);
+  assert.equal(normalized.postal_code, "55303");
+  assert.equal(normalized.postalCode, undefined);
+  await assert.rejects(
+    () => calculateStripeTax({ stripe: { tax: { calculations: { create: async () => { throw new Error("must not be called"); } } } }, amountCents: 100, serviceId: "s1", address: normalized }),
+    TaxAddressRequiredError,
+  );
+});
+
 test("webhook amount mismatch is rejected in cents", () => {
   assert.doesNotThrow(() => assertPaidAmountMatches(3853, 3853));
   assert.throws(() => assertPaidAmountMatches(3853, 3852), (error) => error.code === "PAYMENT_AMOUNT_MISMATCH");

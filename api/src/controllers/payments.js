@@ -4,7 +4,7 @@ import { badRequest } from "../utils/validators.js";
 import { PUBLIC_WEB_URL, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET } from "../config.js";
 import { dollarsToCents, centsToLegacyDollars, basisPointsToLegacyRate } from "../utils/money.js";
 import { calculatePreTaxQuote } from "../utils/promotions.js";
-import { calculateStripeTax, TaxAddressRequiredError, TaxUnavailableError, validateTaxAddress } from "../utils/tax.js";
+import { calculateStripeTax, TaxAddressRequiredError, TaxUnavailableError } from "../utils/tax.js";
 import { calculateFinalQuote, promotionSnapshot } from "../utils/pricing.js";
 import { claimPromotionUsage } from "../utils/promotionUsage.js";
 
@@ -84,15 +84,15 @@ async function calculateBookingQuote(booking, serviceAddress) {
     preTax = calculatePreTaxQuote({ basePriceCents: dollarsToCents(booking.price), serviceId: booking.serviceId, promotions: [] });
   }
 
-  const address = validateTaxAddress(serviceAddress || bookingAddress(booking));
-  const tax = await calculateStripeTax({ stripe, amountCents: preTax.taxableSubtotalCents, serviceId: booking.serviceId, address });
+  const rawAddress = serviceAddress || bookingAddress(booking);
+  const tax = await calculateStripeTax({ stripe, amountCents: preTax.taxableSubtotalCents, serviceId: booking.serviceId, address: rawAddress });
   return { ...calculateFinalQuote({ preTax, serviceId: booking.serviceId, tax }), taxAddress: {
-    line1: address.line1,
-    line2: address.line2 || null,
-    city: address.city,
-    state: address.state,
-    postalCode: address.postal_code,
-    country: address.country,
+    line1: rawAddress.line1,
+    line2: rawAddress.line2 || null,
+    city: rawAddress.city,
+    state: rawAddress.state,
+    postalCode: rawAddress.postalCode,
+    country: rawAddress.country,
   } };
 }
 
