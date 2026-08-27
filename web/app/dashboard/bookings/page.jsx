@@ -69,6 +69,7 @@ export default function BookingsPage() {
       setQuote({ bookingId: id, serviceAddress: address, ...preview.quote });
       setAddressRequired(false);
       setAddressBookingId(null);
+      setPaying(null);
     } catch (e) {
       if (e.data?.requiresAddress) {
         setAddressRequired(true);
