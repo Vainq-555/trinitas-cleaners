@@ -14,6 +14,7 @@ const links = [
   { href: "/admin/users", label: "Customers", icon: Users },
   { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
   { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
+  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
   { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
   { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
