@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, requireAdmin, requireCustomer } from "../middleware/auth.js";
+import { authenticate, optionalAuthenticate, requireAdmin, requireCustomer } from "../middleware/auth.js";
 
 import * as auth from "../controllers/auth.js";
 import * as services from "../controllers/services.js";
@@ -15,7 +15,7 @@ const router = Router();
 
 // ---------- Public ----------
 router.get("/health", (req, res) => res.json({ ok: true }));
-router.get("/services", services.listServices);
+router.get("/services", optionalAuthenticate, services.listServices);
 router.get("/broadcasts/public", broadcasts.listPublicBroadcasts);
 
 // ---------- Auth ----------
@@ -55,6 +55,7 @@ router.get("/admin/stats", adminOnly, users.adminStats);
 router.get("/admin/bookings", adminOnly, bookings.adminListBookings);
 router.patch("/admin/bookings/:id/status", adminOnly, bookings.adminSetBookingStatus);
 
+router.get("/admin/services", adminOnly, services.adminListServices);
 router.post("/admin/services", adminOnly, services.adminCreateService);
 router.put("/admin/services/:id", adminOnly, services.adminUpdateService);
 router.put("/admin/services/:id/price/global", adminOnly, services.adminSetGlobalPrice);

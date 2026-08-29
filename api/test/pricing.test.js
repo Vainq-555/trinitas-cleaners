@@ -7,9 +7,14 @@ import { assertPaidAmountMatches } from "../src/controllers/payments.js";
 import { receiptSnapshotData } from "../src/controllers/payments.js";
 import { claimPromotionUsage } from "../src/utils/promotionUsage.js";
 import { dollarsToCents } from "../src/utils/money.js";
+import { optionalAuthenticate, requireAdmin } from "../src/middleware/auth.js";
+import { adminCreateService, adminUpdateService } from "../src/controllers/services.js";
+import { adminSetGlobalPrice, adminSetCustomerPrice } from "../src/controllers/services.js";
+import prisma from "../src/utils/prisma.js";
 
 const address = { line1: "1 Main St", city: "Anoka", state: "MN", postalCode: "55303", country: "US" };
 const promotion = (overrides = {}) => ({ id: "p1", name: "Promo", discountType: "percentage", discountValue: 1000, active: true, priority: 0, usageCount: 0, services: [], createdAt: "2026-01-01T00:00:00Z", ...overrides });
+const response = () => ({ statusCode: null, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
 
 test("$40 service without promotion stays exact cents", () => {
   const quote = calculatePreTaxQuote({ basePriceCents: 4000, serviceId: "s1" });
@@ -174,4 +179,95 @@ test("promotion usage claims serialize concurrent attempts for one booking", asy
   const results = await Promise.all([claimPromotionUsage(tx, booking), claimPromotionUsage(tx, booking)]);
   assert.deepEqual(results.sort(), [false, true]);
   assert.equal(tx.state.usageCount, 1);
+});
+
+test("optional authentication leaves public requests open without or with invalid credentials", async () => {
+  let continued = 0;
+  await optionalAuthenticate({ headers: {} }, response(), () => { continued += 1; });
+  await optionalAuthenticate({ headers: { authorization: "Bearer invalid" } }, response(), () => { continued += 1; });
+  assert.equal(continued, 2);
+});
+
+test("admin authentication still rejects missing and non-admin users", () => {
+  const missing = response();
+  requireAdmin({}, missing, () => assert.fail("missing user should not continue"));
+  assert.equal(missing.statusCode, 401);
+
+  const customer = response();
+  requireAdmin({ user: { role: "customer" } }, customer, () => assert.fail("customer should not continue"));
+  assert.equal(customer.statusCode, 403);
+});
+
+test("service create and update reject invalid names, descriptions, and prices", async () => {
+  const createCases = [
+    { name: "", basePrice: 1 },
+    { name: "   ", basePrice: 1 },
+    { name: 123, basePrice: 1 },
+    { name: "Valid", description: {}, basePrice: 1 },
+    { name: "Valid", basePrice: -1 },
+    { name: "Valid", basePrice: Infinity },
+  ];
+  for (const body of createCases) {
+    const res = response();
+    await adminCreateService({ body }, res);
+    assert.equal(res.statusCode, 400);
+  }
+
+  const updateCases = [
+    { name: "" },
+    { name: [] },
+    { description: [] },
+    { basePrice: -1 },
+    { basePrice: Infinity },
+  ];
+  for (const body of updateCases) {
+    const res = response();
+    await adminUpdateService({ params: { id: "service-1" }, body }, res);
+    assert.equal(res.statusCode, 400);
+  }
+});
+
+test("global service price accepts zero and positive finite values only", async () => {
+  const invalidValues = [-1, NaN, Infinity, -Infinity, "10"];
+  for (const basePrice of invalidValues) {
+    const res = response();
+    await adminSetGlobalPrice({ params: { id: "service-1" }, body: { basePrice } }, res);
+    assert.equal(res.statusCode, 400);
+  }
+
+  const originalUpdate = prisma.service.update;
+  prisma.service.update = async ({ data }) => ({ basePrice: data.basePrice });
+  try {
+    for (const basePrice of [0, 12.5]) {
+      const res = response();
+      await adminSetGlobalPrice({ params: { id: "service-1" }, body: { basePrice } }, res);
+      assert.equal(res.body.service.basePrice, basePrice);
+    }
+  } finally {
+    prisma.service.update = originalUpdate;
+  }
+});
+
+test("customer service price accepts zero and positive finite values only", async () => {
+  const invalidValues = [-1, NaN, Infinity, -Infinity, "10"];
+  for (const price of invalidValues) {
+    const res = response();
+    await adminSetCustomerPrice({ params: { id: "service-1" }, body: { customerId: "customer-1", price } }, res);
+    assert.equal(res.statusCode, 400);
+  }
+
+  const originalFindUnique = prisma.user.findUnique;
+  const originalUpsert = prisma.customPrice.upsert;
+  prisma.user.findUnique = async () => ({ id: "customer-1" });
+  prisma.customPrice.upsert = async ({ update }) => ({ price: update.price });
+  try {
+    for (const price of [0, 12.5]) {
+      const res = response();
+      await adminSetCustomerPrice({ params: { id: "service-1" }, body: { customerId: "customer-1", price } }, res);
+      assert.equal(res.body.customPrice.price, price);
+    }
+  } finally {
+    prisma.user.findUnique = originalFindUnique;
+    prisma.customPrice.upsert = originalUpsert;
+  }
 });

@@ -38,6 +38,28 @@ export async function authenticate(req, res, next) {
   next();
 }
 
+// Loads a valid session when present without blocking public endpoints.
+export async function optionalAuthenticate(req, res, next) {
+  const token = extractToken(req);
+  if (!token) return next();
+
+  let payload;
+  try {
+    payload = verifyToken(token);
+  } catch {
+    return next();
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user) return next();
+    req.user = user;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 // RBAC: requireRole("admin") — strictly separates admin and customer routes.
 export function requireRole(...roles) {
   return (req, res, next) => {

@@ -29,7 +29,7 @@ export async function createBooking(req, res) {
   }
 
   const service = await prisma.service.findUnique({ where: { id: serviceId } });
-  if (!service) return badRequest(res, "Service not found");
+  if (!service || !service.isActive) return badRequest(res, "Service not found");
 
   const price = await effectivePrice(service, req.user.id);
   let basePriceCents;

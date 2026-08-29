@@ -35,17 +35,22 @@ export async function listServices(req, res) {
 
 // ---- Admin: pricing control ----
 
+export async function adminListServices(req, res) {
+  const services = await prisma.service.findMany({ orderBy: { name: "asc" } });
+  res.json({ services });
+}
+
 export async function adminCreateService(req, res) {
   const { name, description, basePrice } = req.body || {};
-  if (!name || typeof basePrice !== "number" || basePrice < 0) {
+  if (typeof name !== "string" || !name.trim() || (description !== undefined && typeof description !== "string") || typeof basePrice !== "number" || !Number.isFinite(basePrice) || basePrice < 0 || (req.body.isActive !== undefined && typeof req.body.isActive !== "boolean")) {
     return badRequest(res, "name and a non-negative basePrice are required");
   }
   const service = await prisma.service.create({
     data: {
       name: name.trim(),
-      description: description || "",
+      description: description?.trim() || "",
       basePrice,
-      isActive: req.body.isActive !== false,
+      isActive: req.body.isActive ?? true,
     },
   });
   res.status(201).json({ service });
@@ -54,10 +59,13 @@ export async function adminCreateService(req, res) {
 export async function adminUpdateService(req, res) {
   const { id } = req.params;
   const { name, description, basePrice, isActive } = req.body || {};
+  if ((name !== undefined && (typeof name !== "string" || !name.trim())) || (description !== undefined && typeof description !== "string") || (basePrice !== undefined && (typeof basePrice !== "number" || !Number.isFinite(basePrice) || basePrice < 0)) || (isActive !== undefined && typeof isActive !== "boolean")) {
+    return badRequest(res, "service fields are invalid");
+  }
   const data = {};
-  if (name !== undefined) data.name = name;
-  if (description !== undefined) data.description = description;
-  if (typeof basePrice === "number") data.basePrice = basePrice;
+  if (name !== undefined) data.name = name.trim();
+  if (description !== undefined) data.description = description.trim();
+  if (basePrice !== undefined) data.basePrice = basePrice;
   if (typeof isActive === "boolean") data.isActive = isActive;
 
   const service = await prisma.service.update({ where: { id }, data });
@@ -68,7 +76,7 @@ export async function adminUpdateService(req, res) {
 export async function adminSetGlobalPrice(req, res) {
   const { id } = req.params;
   const { basePrice } = req.body || {};
-  if (typeof basePrice !== "number" || basePrice < 0) {
+  if (typeof basePrice !== "number" || !Number.isFinite(basePrice) || basePrice < 0) {
     return badRequest(res, "basePrice must be a non-negative number");
   }
   const service = await prisma.service.update({ where: { id }, data: { basePrice } });
@@ -79,7 +87,7 @@ export async function adminSetGlobalPrice(req, res) {
 export async function adminSetCustomerPrice(req, res) {
   const { id: serviceId } = req.params;
   const { customerId, price } = req.body || {};
-  if (!customerId || typeof price !== "number" || price < 0) {
+  if (!customerId || typeof price !== "number" || !Number.isFinite(price) || price < 0) {
     return badRequest(res, "customerId and a non-negative price are required");
   }
 
