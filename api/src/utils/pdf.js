@@ -67,13 +67,19 @@ export function buildReceiptPdf(receipt, customer, service, booking) {
     doc.moveDown(0.4);
 
     const label = service ? service.name : "Custom charge";
-    doc.fontSize(10).fillColor(ink).text(label);
+    const amountX = doc.page.width - 48 - 80;
+    const labelWidth = amountX - 48 - 12;
+    let rowY = doc.y;
+    doc.fontSize(10).fillColor(ink).text(label, 48, rowY, { width: labelWidth });
     if (booking) {
       doc.fontSize(9).fillColor(gray).text(
         `Booking # ${booking.id.slice(0, 8).toUpperCase()} on ${booking.date.toLocaleDateString(
           "en-US",
           { weekday: "short", year: "numeric", month: "short", day: "numeric" }
-        )}`
+        )}`,
+        48,
+        rowY + 14,
+        { width: labelWidth }
       );
     }
 
@@ -84,41 +90,37 @@ export function buildReceiptPdf(receipt, customer, service, booking) {
     const tax = authoritative ? receipt.taxCents : receipt.tax;
     const total = authoritative ? receipt.finalAmountCents : receipt.total;
 
-    // Price columns
-    doc.fillColor(ink).fontSize(10);
-    doc.text(authoritative ? "Service price" : "Subtotal", doc.page.width - 48 - 80, doc.y - 20, { width: 80, align: "right" });
-    doc.text(authoritative ? formatMoneyCents(base) : formatMoney(base), doc.page.width - 48 - 80, doc.y + 2, {
-      width: 80,
-      align: "right",
-    });
+    const drawRow = (name, value, y) => {
+      doc.fillColor(ink).fontSize(10).text(name, 48, y, { width: labelWidth });
+      doc.text(value, amountX, y, { width: 80, align: "right" });
+    };
+
+    // Price columns use shared row coordinates so labels and values stay aligned.
+    rowY += booking ? 32 : 18;
+    drawRow(authoritative ? "Service price" : "Subtotal", authoritative ? formatMoneyCents(base) : formatMoney(base), rowY);
+    rowY += 18;
 
     if (authoritative) {
-      doc.moveDown(0.6);
-      doc.fillColor(ink).text("Discount");
-      doc.text(`- ${formatMoneyCents(discount)}`, doc.page.width - 48 - 80, doc.y - 14, { width: 80, align: "right" });
-      doc.moveDown(0.6);
-      doc.fillColor(ink).text("Taxable subtotal");
-      doc.text(formatMoneyCents(taxableSubtotal), doc.page.width - 48 - 80, doc.y - 14, { width: 80, align: "right" });
+      drawRow("Discount", `- ${formatMoneyCents(discount)}`, rowY);
+      rowY += 18;
+      drawRow("Taxable subtotal", formatMoneyCents(taxableSubtotal), rowY);
+      rowY += 18;
     }
 
-    doc.moveDown(0.8);
-    const taxLabel = authoritative && Number.isInteger(receipt.taxRateBasisPoints)
-      ? `Tax (${(receipt.taxRateBasisPoints / 100).toFixed(2)}%)`
-      : `Tax (${(receipt.taxRate * 100).toFixed(2)}%)`;
-    doc.fillColor(ink).fontSize(10).text(taxLabel);
-    doc.text(authoritative ? formatMoneyCents(tax) : formatMoney(tax), doc.page.width - 48 - 80, doc.y - 14, {
-      width: 80,
-      align: "right",
-    });
+    const taxRatePercent = authoritative && Number.isInteger(receipt.taxRateBasisPoints)
+      ? receipt.taxRateBasisPoints / 100
+      : authoritative && Number.isInteger(tax) && Number.isInteger(taxableSubtotal) && taxableSubtotal > 0
+        ? (tax / taxableSubtotal) * 100
+        : receipt.taxRate * 100;
+    drawRow(`Tax (${taxRatePercent.toFixed(2)}%)`, authoritative ? formatMoneyCents(tax) : formatMoney(tax), rowY);
+    rowY += 18;
 
     if (!authoritative && discount > 0) {
-      doc.moveDown(0.6);
-      doc.fillColor(ink).text("Discount");
-      doc.text(`- ${formatMoney(discount)}`, doc.page.width - 48 - 80, doc.y - 14, {
-        width: 80,
-        align: "right",
-      });
+      drawRow("Discount", `- ${formatMoney(discount)}`, rowY);
+      rowY += 18;
     }
+
+    doc.y = rowY;
 
     if (receipt.note) {
       doc.moveDown(0.8);
