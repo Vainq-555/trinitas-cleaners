@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { use, useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
   MessageSquare, Megaphone, UserRound, ArrowLeft, BadgePercent,
@@ -22,11 +22,12 @@ const links = [
 ];
 
 export default function InspectUserPage({ params }) {
+  const { id } = use(params);
   const [data, setData] = useState(null);
 
   useEffect(() => {
-    api(`/admin/users/${params.id}`).then(setData).catch(() => setData({ notFound: true }));
-  }, [params.id]);
+    api(`/admin/users/${id}`).then(setData).catch(() => setData({ notFound: true }));
+  }, [id]);
 
   if (!data) {
     return (
