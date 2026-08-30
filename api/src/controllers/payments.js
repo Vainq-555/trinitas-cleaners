@@ -228,10 +228,16 @@ async function processEvent(tx, event) {
   const bookingId = data.metadata?.bookingId;
   const paymentWhere = bookingId ? { bookingId } : data.id.startsWith("cs_") ? { stripeCheckoutSessionId: data.id } : { stripePaymentIntentId: data.payment_intent || data.id };
   const payment = await tx.payment.findFirst({ where: paymentWhere });
-  if (!payment) return;
+  if (!payment) {
+    console.warn("Stripe webhook: payment not found", { eventId: event.id, eventType: event.type, paymentWhere, sessionId: data.id, bookingId: data.metadata?.bookingId });
+    return;
+  }
 
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
-    if (data.payment_status !== "paid" && event.type === "checkout.session.completed") return;
+    if (data.payment_status !== "paid" && event.type === "checkout.session.completed") {
+      console.warn("Stripe webhook: payment not paid", { eventId: event.id, eventType: event.type, payment_status: data.payment_status, bookingId: payment.bookingId, paymentStatus: payment.status });
+      return;
+    }
     const receivedCents = data.amount_total;
     const expectedCents = payment.finalAmountCents;
     try { assertPaidAmountMatches(expectedCents, receivedCents); }
@@ -239,7 +245,10 @@ async function processEvent(tx, event) {
       error.details = { eventId: event.id, eventType: event.type, bookingId: payment.bookingId, paymentId: payment.id, expectedCents, receivedCents };
       throw error;
     }
-    if (payment.status === "refunded") return;
+    if (payment.status === "refunded") {
+      console.warn("Stripe webhook: payment already refunded", { eventId: event.id, eventType: event.type, bookingId: payment.bookingId });
+      return;
+    }
     const updated = await tx.payment.update({ where: { id: payment.id }, data: { status: "paid", amountPaidCents: receivedCents, amountPaid: centsToLegacyDollars(receivedCents), paidAt: new Date(), stripePaymentIntentId: typeof data.payment_intent === "string" ? data.payment_intent : payment.stripePaymentIntentId } });
     const booking = await tx.booking.findUnique({ where: { id: payment.bookingId } });
     if (booking) {
