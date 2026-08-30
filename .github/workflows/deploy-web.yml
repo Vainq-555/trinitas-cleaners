@@ -1,0 +1,52 @@
+name: Deploy Cloudflare Web (OpenNext)
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Commit SHA to deploy (defaults to the pinned application commit)"
+        required: false
+        default: "db55864ff6affe62c3a3540006f7ca90dd47b0b4"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-web-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-web:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Check out the pinned application commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.commit }}
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Verify Cloudflare API token is configured
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::Repository secret CLOUDFLARE_API_TOKEN is not set"
+            exit 1
+          fi
+
+      - name: Install web dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Deploy web to Cloudflare via OpenNext/Wrangler
+        run: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
