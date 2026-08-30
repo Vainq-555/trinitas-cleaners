@@ -12,6 +12,7 @@ npm-debug.log*
 .open-next/
 
 api/.env.production
+api/.env.backup
 
 firebase-debug.log
 firebase-debug.*.log
