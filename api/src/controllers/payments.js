@@ -31,7 +31,7 @@ export function assertPaidAmountMatches(expectedCents, receivedCents) {
   }
 }
 
-function bookingAddress(booking) {
+export function bookingAddress(booking) {
   return {
     line1: booking.taxAddressLine1,
     line2: booking.taxAddressLine2,
@@ -68,7 +68,7 @@ function publicQuote(quote) {
   };
 }
 
-async function calculateBookingQuote(booking, serviceAddress) {
+export async function calculateBookingQuote(booking, serviceAddress, stripeClient = stripe) {
   let preTax;
   if (Number.isInteger(booking.basePriceCents) && Number.isInteger(booking.taxableSubtotalCents)) {
     preTax = {
@@ -85,7 +85,7 @@ async function calculateBookingQuote(booking, serviceAddress) {
   }
 
   const rawAddress = serviceAddress || bookingAddress(booking);
-  const tax = await calculateStripeTax({ stripe, amountCents: preTax.taxableSubtotalCents, serviceId: booking.serviceId, address: rawAddress });
+  const tax = await calculateStripeTax({ stripe: stripeClient, amountCents: preTax.taxableSubtotalCents, serviceId: booking.serviceId, address: rawAddress });
   return { ...calculateFinalQuote({ preTax, serviceId: booking.serviceId, tax }), taxAddress: {
     line1: rawAddress.line1,
     line2: rawAddress.line2 || null,
@@ -96,7 +96,7 @@ async function calculateBookingQuote(booking, serviceAddress) {
   } };
 }
 
-async function saveQuote(booking, quote) {
+export async function saveQuote(booking, quote, db = prisma) {
   const snapshot = promotionSnapshot(quote);
   const data = {
     basePriceCents: quote.basePriceCents,
@@ -109,7 +109,7 @@ async function saveQuote(booking, quote) {
     ...(quote.taxAddress ? addressFields(quote.taxAddress) : {}),
     ...snapshot,
   };
-  return prisma.booking.update({ where: { id: booking.id }, data });
+  return db.booking.update({ where: { id: booking.id }, data });
 }
 
 export async function createCheckout(req, res) {
@@ -215,12 +215,12 @@ export function receiptSnapshotData(booking, payment) {
   };
 }
 
-async function createSnapshotReceipt(tx, booking, payment) {
+export async function createSnapshotReceipt(tx, booking, payment) {
   const data = receiptSnapshotData(booking, payment);
   if (!data) return;
   const existing = await tx.receipt.findFirst({ where: { bookingId: booking.id } });
-  if (existing) return;
-  await tx.receipt.create({ data });
+  if (existing) return existing;
+  return tx.receipt.create({ data });
 }
 
 async function processEvent(tx, event) {

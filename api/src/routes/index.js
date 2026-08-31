@@ -10,6 +10,8 @@ import * as broadcasts from "../controllers/broadcasts.js";
 import * as users from "../controllers/users.js";
 import * as payments from "../controllers/payments.js";
 import * as promotions from "../controllers/promotions.js";
+import * as reconciliation from "../controllers/reconciliation.js";
+import * as cashPayments from "../controllers/cashPayments.js";
 
 const router = Router();
 
@@ -54,6 +56,10 @@ router.get("/admin/stats", adminOnly, users.adminStats);
 
 router.get("/admin/bookings", adminOnly, bookings.adminListBookings);
 router.patch("/admin/bookings/:id/status", adminOnly, bookings.adminSetBookingStatus);
+
+router.get("/admin/payments/reconciliation", adminOnly, reconciliation.adminPaymentReconciliation);
+router.post("/admin/payments/:bookingId/cash-collect", adminOnly, cashPayments.adminCashCollect);
+router.post("/admin/payments/:bookingId/cash-refund", adminOnly, cashPayments.adminCashRefund);
 
 router.get("/admin/services", adminOnly, services.adminListServices);
 router.post("/admin/services", adminOnly, services.adminCreateService);

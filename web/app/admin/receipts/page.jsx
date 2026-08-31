@@ -57,16 +57,25 @@ export default function ReceiptsPage() {
       setForm({ customerId: "", bookingId: "", subtotal: "", discount: "0", note: "" });
       load();
     } catch (x) {
-      setErr(x.message);
+      // A booking-linked receipt without stored authoritative cents is refused by
+      // the backend (NO_AUTHORITATIVE_QUOTE). Surface that instead of fabricating totals.
+      const detail =
+        x.status === 422 && x.data?.code === "NO_AUTHORITATIVE_QUOTE"
+          ? "This booking cannot receive an authoritative booking-linked receipt yet — no stored quote is available. Issue a standalone receipt or collect the payment first."
+          : x.message;
+      setErr(detail);
     } finally {
       setBusy(false);
     }
   };
 
   const subtotal = Number(form.subtotal || 0);
-  const tax = subtotal * 0.0725;
+  // Booking-linked receipts rely entirely on the backend's stored cents. Only the
+  // standalone (no bookingId) manual path shows a client-side tax preview.
+  const isLinked = Boolean(form.bookingId);
+  const tax = isLinked ? 0 : subtotal * 0.0725;
   const discount = Number(form.discount) || 0;
-  const total = subtotal + tax - discount;
+  const total = isLinked ? 0 : subtotal + tax - discount;
 
   return (
     <Shell links={links} sections={["Admin Portal"]} title="Receipts"
@@ -99,14 +108,14 @@ export default function ReceiptsPage() {
                 placeholder="Leave blank for a custom charge" />
             </div>
             <div>
-              <label className="label">Subtotal ($)</label>
-              <input className="input" type="number" step="0.01" min="0" required value={form.subtotal}
-                onChange={set("subtotal")} placeholder="0.00" />
+              <label className="label">Subtotal ($) {isLinked && <span className="text-muted">(auto)</span>}</label>
+              <input className="input" type="number" step="0.01" min="0" required={!isLinked} value={form.subtotal}
+                onChange={set("subtotal")} placeholder="0.00" disabled={isLinked} />
             </div>
             <div>
-              <label className="label">Discount ($)</label>
+              <label className="label">Discount ($) {isLinked && <span className="text-muted">(from booking)</span>}</label>
               <input className="input" type="number" step="0.01" min="0" value={form.discount}
-                onChange={set("discount")} placeholder="0.00" />
+                onChange={set("discount")} placeholder="0.00" disabled={isLinked} />
             </div>
             <div className="sm:col-span-2">
               <label className="label">Note (optional)</label>
@@ -119,7 +128,15 @@ export default function ReceiptsPage() {
             <button className="btn btn-primary" disabled={busy}>
               <Send size={16} /> {busy ? "Creating…" : "Issue receipt"}
             </button>
-            {form.subtotal && (
+            {isLinked ? (
+              <div className="flex items-center gap-2 rounded-lg bg-slate-50 border border-line px-4 py-2 text-sm">
+                <Calculator size={15} className="text-muted" />
+                <span className="text-muted">
+                  Amounts are sourced from the booking&apos;s stored authoritative total — the backend uses the stored
+                  tax and total only. No totals are calculated here.
+                </span>
+              </div>
+            ) : form.subtotal && (
               <div className="flex items-center gap-2 rounded-lg bg-slate-50 border border-line px-4 py-2 text-sm">
                 <Calculator size={15} className="text-muted" />
                 <span className="text-muted">

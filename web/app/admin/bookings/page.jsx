@@ -4,15 +4,18 @@ import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
   MessageSquare, Megaphone, Check, X, Hammer, Inbox, CheckCircle2, ThumbsDown, BadgePercent, Wrench,
+  Banknote, RotateCcw, Receipt,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import StatusBadge from "@/components/StatusBadge";
-import { api, fmtDate, money } from "@/lib/api";
+import { api, fmtDate, money, moneyCents } from "@/lib/api";
+import { cashActionsFor, classifyCashError, collectPayload } from "@/lib/cashAdmin";
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/users", label: "Customers", icon: Users },
   { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
+  { href: "/admin/payments", label: "Payments", icon: Banknote },
   { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
   { href: "/admin/services", label: "Services", icon: Wrench },
   { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
@@ -31,8 +34,12 @@ export default function AdminBookingsPage() {
   const [bookings, setBookings] = useState([]);
   const [session, setSession] = useState("pending");
   const [busyId, setBusyId] = useState(null);
+  const [confirm, setConfirm] = useState(null); // { booking, action: "collect" | "refund" }
+  const [notice, setNotice] = useState("");
+  const [err, setErr] = useState("");
 
   const load = () => api("/admin/bookings").then((d) => setBookings(d.bookings)).catch(() => {});
+  const clearMessages = () => { setNotice(""); setErr(""); };
 
   useEffect(() => {
     load();
@@ -42,11 +49,52 @@ export default function AdminBookingsPage() {
 
   const setStatus = async (id, status) => {
     setBusyId(id);
+    clearMessages();
     try {
       await api(`/admin/bookings/${id}/status`, { method: "PATCH", body: { status } });
       load();
     } catch (e) {
-      alert(e.message);
+      setErr(e.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const openCollect = (booking) => {
+    clearMessages();
+    setConfirm({ booking, action: "collect" });
+  };
+
+  const openRefund = (booking) => {
+    clearMessages();
+    setConfirm({ booking, action: "refund" });
+  };
+
+  const runCashAction = async () => {
+    const { booking, action } = confirm || {};
+    if (!booking) return;
+    setBusyId(booking.id);
+    setErr("");
+    setNotice("");
+    try {
+      if (action === "collect") {
+        const payload = collectPayload(booking);
+        if (!payload) throw new Error("No authoritative total is available for this booking");
+        const result = await api(`/admin/payments/${booking.id}/cash-collect`, { method: "POST", body: payload });
+        setNotice(
+          `Collected ${moneyCents(payload.finalAmountCents)}. Payment ${result.payment.status}${result.receipt ? ` — receipt ${result.receipt.id.slice(0, 8).toUpperCase()} created.` : "."}`
+        );
+      } else {
+        const result = await api(`/admin/payments/${booking.id}/cash-refund`, { method: "POST", body: {} });
+        setNotice(`Cash refunded (${result.payment.status}).`);
+      }
+      setConfirm(null);
+      load();
+    } catch (e) {
+      const classified = classifyCashError(e);
+      setErr(classified.message);
+      setConfirm(null);
+      if (classified.refresh) load();
     } finally {
       setBusyId(null);
     }
@@ -78,6 +126,9 @@ export default function AdminBookingsPage() {
         })}
       </div>
 
+      {notice && <div className="form-ok">{notice}</div>}
+      {err && <div className="form-error">{err}</div>}
+
       {shown.length === 0 ? (
         <div className="card empty-state">
           <Inbox size={36} className="mx-auto text-slate-300" />
@@ -101,11 +152,21 @@ export default function AdminBookingsPage() {
                     </td>
                     <td>{b.service.name}</td>
                     <td className="text-muted">{fmtDate(b.date)}</td>
-                    <td className="font-semibold">{money(b.price)}</td>
+                    <td className="font-semibold">
+                      {b.payment?.method === "cash" && Number.isInteger(b.finalAmountCents)
+                        ? moneyCents(b.finalAmountCents)
+                        : money(b.price)}
+                      {b.payment?.method === "cash" && !Number.isInteger(b.finalAmountCents) && (
+                        <span className="text-xs font-normal text-muted">quote required</span>
+                      )}
+                    </td>
                     <td className="text-xs">
                       <div className="font-semibold capitalize">{b.payment?.method || "—"}</div>
-                      <div className={b.payment?.status === "paid" ? "text-clean" : "text-muted"}>{b.payment?.status || "—"}</div>
+                      <div className={b.payment?.status === "paid" ? "text-clean" : b.payment?.status === "refunded" ? "text-danger" : "text-muted"}>{b.payment?.status || "—"}</div>
                       {b.payment?.amountPaid > 0 && <div>{money(b.payment.amountPaid)} paid</div>}
+                      {b.payment?.method === "cash" && b.payment?.status === "refunded" && (
+                        <div className="text-danger">Refunded on {b.payment?.refundedAt ? new Date(b.payment.refundedAt).toLocaleString() : ""}</div>
+                      )}
                       {b.payment?.paidAt && <div className="text-muted">{new Date(b.payment.paidAt).toLocaleString()}</div>}
                       {b.payment?.stripeCheckoutSessionId && <div className="max-w-[130px] truncate text-muted" title={b.payment.stripeCheckoutSessionId}>{b.payment.stripeCheckoutSessionId}</div>}
                       {b.payment?.stripePaymentIntentId && <div className="max-w-[130px] truncate text-muted" title={b.payment.stripePaymentIntentId}>{b.payment.stripePaymentIntentId}</div>}
@@ -114,6 +175,38 @@ export default function AdminBookingsPage() {
                     <td><StatusBadge status={b.status} /></td>
                     <td className="text-right">
                       <div className="flex justify-end gap-2">
+                        {(() => {
+                          const a = cashActionsFor(b);
+                          if (a.canCollect) {
+                            return (
+                              <button className="btn btn-primary btn-sm" disabled={busyId === b.id} onClick={() => openCollect(b)}>
+                                <Banknote size={14} /> Collect payment
+                              </button>
+                            );
+                          }
+                          if (a.needsQuote) {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted" title="No authoritative total stored. A new quote must be generated.">
+                                <Receipt size={14} /> Quote required
+                              </span>
+                            );
+                          }
+                          if (a.canRefund) {
+                            return (
+                              <button className="btn btn-secondary btn-sm" disabled={busyId === b.id} onClick={() => openRefund(b)}>
+                                <RotateCcw size={14} /> Refund cash
+                              </button>
+                            );
+                          }
+                          if (a.isRefunded) {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-danger">
+                                <RotateCcw size={14} /> Refunded
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
                         {b.status === "pending" && (
                           <>
                             <button className="btn btn-primary btn-sm" disabled={busyId === b.id} onClick={() => setStatus(b.id, "accepted")}>
@@ -140,6 +233,48 @@ export default function AdminBookingsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {confirm && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 px-4" role="dialog" aria-modal="true">
+          <div className="card card-pad w-full max-w-md">
+            {confirm.action === "collect" ? (
+              <>
+                <h2 className="font-bold text-ink">Collect cash payment</h2>
+                <p className="mt-2 text-sm text-muted">
+                  Confirm collection of{" "}
+                  <span className="font-extrabold text-brand">{moneyCents(confirm.booking.finalAmountCents)}</span> for{" "}
+                  <span className="font-semibold text-ink">{confirm.booking.customer.name}</span>.
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  The payment will be marked paid using the authoritative stored total. A receipt will be generated.
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 className="font-bold text-ink">Refund cash payment</h2>
+                <p className="mt-2 text-sm text-muted">
+                  This will mark{" "}
+                  <span className="font-semibold text-ink">{confirm.booking.customer.name}</span>&apos;s cash payment as{" "}
+                  <span className="font-semibold text-danger">refunded</span>, zeroing amounts paid.
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  The booking&apos;s quoted totals are kept unchanged.
+                </p>
+              </>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <button className="btn btn-outline btn-sm" onClick={() => setConfirm(null)}>Cancel</button>
+              <button
+                className={`btn btn-sm ${confirm.action === "collect" ? "btn-primary" : "btn-danger"}`}
+                disabled={busyId === confirm.booking.id}
+                onClick={runCashAction}
+              >
+                {busyId === confirm.booking.id ? "Working…" : confirm.action === "collect" ? "Confirm collection" : "Confirm refund"}
+              </button>
+            </div>
           </div>
         </div>
       )}
