@@ -9,6 +9,7 @@ import {
 import Shell from "@/components/Shell";
 import ServiceCard from "@/components/ServiceCard";
 import { api, money, moneyCents } from "@/lib/api";
+import { useMyLocation } from "@/lib/geo";
 
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
@@ -29,6 +30,8 @@ export default function ServicesPage() {
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
   const [busy, setBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [locNote, setLocNote] = useState("");
   const [address, setAddress] = useState({ line1: "", city: "", state: "", postalCode: "", country: "US" });
   const [promoCode, setPromoCode] = useState("");
   const [quote, setQuote] = useState(null);
@@ -36,6 +39,28 @@ export default function ServicesPage() {
   useEffect(() => {
     api("/services").then((d) => setServices(d.services)).catch(() => {});
   }, []);
+
+  const useLocation = async () => {
+    if (locating) return;
+    setLocating(true);
+    setLocNote("");
+    try {
+      const result = await useMyLocation({ geolocation: typeof navigator !== "undefined" ? navigator.geolocation : null });
+      if (result?.ok && result.address) {
+        setAddress({ country: "US", ...result.address });
+        setLocNote("Address filled from your current location — please review and edit before booking.");
+      } else if (result?.address) {
+        setAddress({ country: "US", ...address, ...result.address });
+        setLocNote(result?.message || "Please review and correct the address.");
+      } else {
+        setLocNote(result?.message || "We couldn't use your current location. Please enter your address manually.");
+      }
+    } catch {
+      setLocNote("We couldn't use your current location. Please enter your address manually.");
+    } finally {
+      setLocating(false);
+    }
+  };
 
   const book = async (e) => {
     e.preventDefault();
@@ -130,6 +155,10 @@ export default function ServicesPage() {
                   <input className="input" required placeholder="Street address" value={address.line1} onChange={(e) => setAddress({ ...address, line1: e.target.value })} />
                   <div className="grid grid-cols-2 gap-2"><input className="input" required placeholder="City" value={address.city} onChange={(e) => setAddress({ ...address, city: e.target.value })} /><input className="input" required placeholder="State" maxLength="2" value={address.state} onChange={(e) => setAddress({ ...address, state: e.target.value })} /></div>
                   <input className="input" required placeholder="ZIP code" value={address.postalCode} onChange={(e) => setAddress({ ...address, postalCode: e.target.value })} />
+                  <button type="button" className="btn btn-outline btn-sm" onClick={useLocation} disabled={locating}>
+                    {locating ? "Finding your location…" : "📍 Use my current location"}
+                  </button>
+                  {locNote && <p className="text-xs text-muted" role="status">{locNote}</p>}
                 </div>
                 <p className="mt-1 text-xs text-muted">Tax is calculated by Stripe for this location. No estimated rate is used.</p>
               </div>

@@ -12,6 +12,7 @@ import * as payments from "../controllers/payments.js";
 import * as promotions from "../controllers/promotions.js";
 import * as reconciliation from "../controllers/reconciliation.js";
 import * as cashPayments from "../controllers/cashPayments.js";
+import * as geocode from "../controllers/geocode.js";
 
 const router = Router();
 
@@ -34,6 +35,8 @@ router.get("/bookings", authenticate, requireCustomer, bookings.listMyBookings);
 router.post("/bookings", authenticate, requireCustomer, bookings.createBooking);
 router.post("/bookings/:id/checkout", authenticate, requireCustomer, payments.createCheckout);
 router.delete("/bookings/:id", authenticate, bookings.deleteBooking);
+
+router.get("/geocode/reverse", authenticate, requireCustomer, geocode.reverseGeocode);
 
 router.get("/receipts", authenticate, requireCustomer, receipts.listMyReceipts);
 router.get("/receipts/:id/pdf", authenticate, receipts.downloadReceiptPdf);
