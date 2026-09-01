@@ -45,7 +45,7 @@ export default function ServicesPage() {
     setLocating(true);
     setLocNote("");
     try {
-      const result = await useMyLocation({ geolocation: typeof navigator !== "undefined" ? navigator.geolocation : null });
+      const result = await useMyLocation({ geolocation: typeof navigator !== "undefined" ? navigator.geolocation : null, fetchImpl: (path) => api(path) });
       if (result?.ok && result.address) {
         setAddress({ country: "US", ...result.address });
         setLocNote("Address filled from your current location — please review and edit before booking.");
