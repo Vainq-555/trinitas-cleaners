@@ -61,6 +61,7 @@ router.get("/admin/bookings", adminOnly, bookings.adminListBookings);
 router.patch("/admin/bookings/:id/status", adminOnly, bookings.adminSetBookingStatus);
 
 router.get("/admin/payments/reconciliation", adminOnly, reconciliation.adminPaymentReconciliation);
+router.post("/admin/payments/:bookingId/cash-quote", adminOnly, cashPayments.adminCashQuote);
 router.post("/admin/payments/:bookingId/cash-collect", adminOnly, cashPayments.adminCashCollect);
 router.post("/admin/payments/:bookingId/cash-refund", adminOnly, cashPayments.adminCashRefund);
 

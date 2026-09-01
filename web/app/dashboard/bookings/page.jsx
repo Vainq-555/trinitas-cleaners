@@ -206,7 +206,13 @@ export default function BookingsPage() {
                     <td className="font-semibold">{b.service.name}</td>
                     <td className="text-muted">{fmtDate(b.date)}</td>
                     <td><StatusBadge status={b.status} /></td>
-                    <td className="font-semibold">{Number.isInteger(b.finalAmountCents) ? moneyCents(b.finalAmountCents) : money(b.price)}</td>
+                    <td className="font-semibold">
+                      {b.payment?.method === "cash"
+                        ? (Number.isInteger(b.finalAmountCents)
+                            ? moneyCents(b.finalAmountCents)
+                            : <span className="text-sm font-normal text-muted">Total pending</span>)
+                        : (Number.isInteger(b.finalAmountCents) ? moneyCents(b.finalAmountCents) : money(b.price))}
+                    </td>
                     <td className="text-xs">
                       <div className="font-semibold capitalize">{b.payment?.method || "—"}</div>
                       <div className={b.payment?.status === "paid" ? "text-clean" : "text-muted"}>{b.payment?.status || "—"}</div>

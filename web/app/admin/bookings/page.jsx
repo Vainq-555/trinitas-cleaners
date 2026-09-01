@@ -70,6 +70,22 @@ export default function AdminBookingsPage() {
     setConfirm({ booking, action: "refund" });
   };
 
+  const runQuote = async (booking) => {
+    setBusyId(booking.id);
+    clearMessages();
+    try {
+      // Server recalculates the authoritative Stripe Tax quote from the booking's
+      // stored service address and persists it. No amount/rate is computed here.
+      await api(`/admin/payments/${booking.id}/cash-quote`, { method: "POST", body: {} });
+      setNotice("Total calculated and stored. You can now collect the cash payment.");
+      load();
+    } catch (e) {
+      setErr(classifyCashError(e).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const runCashAction = async () => {
     const { booking, action } = confirm || {};
     if (!booking) return;
@@ -153,11 +169,19 @@ export default function AdminBookingsPage() {
                     <td>{b.service.name}</td>
                     <td className="text-muted">{fmtDate(b.date)}</td>
                     <td className="font-semibold">
-                      {b.payment?.method === "cash" && Number.isInteger(b.finalAmountCents)
-                        ? moneyCents(b.finalAmountCents)
-                        : money(b.price)}
-                      {b.payment?.method === "cash" && !Number.isInteger(b.finalAmountCents) && (
-                        <span className="text-xs font-normal text-muted">quote required</span>
+                      {b.payment?.method === "cash" ? (
+                        Number.isInteger(b.finalAmountCents) ? (
+                          <>
+                            {moneyCents(b.finalAmountCents)}
+                            <div className="text-xs font-normal text-muted">
+                              {moneyCents(b.taxableSubtotalCents)} + {moneyCents(b.taxCents)} tax
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-sm font-normal text-muted">Total pending</span>
+                        )
+                      ) : (
+                        money(b.price)
                       )}
                     </td>
                     <td className="text-xs">
@@ -186,9 +210,9 @@ export default function AdminBookingsPage() {
                           }
                           if (a.needsQuote) {
                             return (
-                              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted" title="No authoritative total stored. A new quote must be generated.">
-                                <Receipt size={14} /> Quote required
-                              </span>
+                              <button className="btn btn-secondary btn-sm" disabled={busyId === b.id} onClick={() => runQuote(b)}>
+                                <Receipt size={14} /> {busyId === b.id ? "Calculating…" : "Calculate total"}
+                              </button>
                             );
                           }
                           if (a.canRefund) {
@@ -248,8 +272,13 @@ export default function AdminBookingsPage() {
                   <span className="font-extrabold text-brand">{moneyCents(confirm.booking.finalAmountCents)}</span> for{" "}
                   <span className="font-semibold text-ink">{confirm.booking.customer.name}</span>.
                 </p>
+                <div className="mt-3 space-y-1.5 rounded-md bg-slate-50 p-3 text-sm">
+                  <div className="flex justify-between text-muted"><span>Taxable subtotal</span><span>{moneyCents(confirm.booking.taxableSubtotalCents)}</span></div>
+                  <div className="flex justify-between text-muted"><span>Sales tax</span><span>{moneyCents(confirm.booking.taxCents)}</span></div>
+                  <div className="flex justify-between border-t border-slate-200 pt-1.5 font-extrabold text-ink"><span>Total due</span><span>{moneyCents(confirm.booking.finalAmountCents)}</span></div>
+                </div>
                 <p className="mt-1 text-xs text-muted">
-                  The payment will be marked paid using the authoritative stored total. A receipt will be generated.
+                  The payment will be marked paid using exactly this authoritative total. A receipt will be generated.
                 </p>
               </>
             ) : (
@@ -272,7 +301,7 @@ export default function AdminBookingsPage() {
                 disabled={busyId === confirm.booking.id}
                 onClick={runCashAction}
               >
-                {busyId === confirm.booking.id ? "Working…" : confirm.action === "collect" ? "Confirm collection" : "Confirm refund"}
+                {busyId === confirm.booking.id ? "Working…" : confirm.action === "collect" ? `Collect ${moneyCents(confirm.booking.finalAmountCents)}` : "Confirm refund"}
               </button>
             </div>
           </div>

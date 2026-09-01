@@ -9,6 +9,7 @@ import {
   bookingAddress,
   calculateBookingQuote,
   createSnapshotReceipt,
+  publicQuote,
   saveQuote,
 } from "./payments.js";
 
@@ -142,6 +143,71 @@ export async function collectCashPayment(req, res, deps = {}) {
 
 export async function adminCashCollect(req, res) {
   return collectCashPayment(req, res);
+}
+
+// Generate and persist the authoritative tax-inclusive quote for a CASH booking
+// BEFORE it is collected. Reuses the exact same server-side Stripe Tax pipeline
+// as collection (calculateBookingQuote -> calculateStripeTax ->
+// calculateFinalQuote) and the same saveQuote persistence, so the amount shown
+// to the admin is exactly what collectCashPayment will collect later. No tax is
+// computed or estimated here; Stripe Tax stays the sole authority. The client
+// never supplies the amount — the server calculates and persists it.
+export async function quoteCashPayment(req, res, deps = {}) {
+  const {
+    findBooking = (id) =>
+      prisma.booking.findUnique({
+        where: { id },
+        include: {
+          payment: true,
+          customer: { select: { name: true, email: true } },
+          service: { select: { name: true } },
+        },
+      }),
+    quoteForBooking = (booking, address) => calculateBookingQuote(booking, address, stripe),
+    persistQuote = saveQuote,
+    persistPayment = (bookingId, quote) =>
+      prisma.payment.update({
+        where: { bookingId },
+        data: { finalAmountCents: quote.finalAmountCents, amount: centsToLegacyDollars(quote.finalAmountCents) },
+      }),
+  } = deps;
+
+  const booking = await findBooking(req.params.bookingId);
+  if (!booking) return res.status(404).json({ error: "Booking not found" });
+  const payment = booking.payment;
+  if (!payment) return badRequest(res, "This booking has no payment record");
+  if (payment.method !== "cash") return badRequest(res, "This booking is not a cash payment");
+  if (payment.status === "refunded") return res.status(409).json({ error: "This cash payment has been refunded and cannot be quoted" });
+
+  // Use the submitted service address if provided (e.g. admin correcting it),
+  // otherwise the legitimately stored tax address. Never invented or substituted.
+  const address = resolveAddress(req.body, booking);
+
+  let quote;
+  try {
+    quote = await quoteForBooking(booking, address);
+  } catch (error) {
+    if (error instanceof TaxAddressRequiredError || error.code === "TAX_ADDRESS_REQUIRED") {
+      return res.status(422).json({ error: error.message, code: "TAX_ADDRESS_REQUIRED", requiresAddress: true });
+    }
+    if (error instanceof TaxUnavailableError || error.code === "TAX_UNAVAILABLE") {
+      return res.status(503).json({ error: error.message, retryable: error.retryable !== false });
+    }
+    if (error.message?.includes("Money value")) return res.status(409).json({ error: "This legacy booking cannot be safely repriced" });
+    console.error("Cash quote failed", error);
+    return res.status(500).json({ error: "Unable to prepare cash quote" });
+  }
+
+  await persistQuote(booking, quote);
+  // Keep the Payment record consistent with the authoritative Booking quote,
+  // mirroring the online checkout flow.
+  await persistPayment(booking.id, quote);
+
+  return res.json({ ok: true, quote: publicQuote(quote) });
+}
+
+export async function adminCashQuote(req, res) {
+  return quoteCashPayment(req, res);
 }
 
 function refundedFields(payment, refundedAt) {

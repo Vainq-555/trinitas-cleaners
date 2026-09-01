@@ -53,7 +53,7 @@ function addressFields(address) {
   };
 }
 
-function publicQuote(quote) {
+export function publicQuote(quote) {
   return {
     basePriceCents: quote.basePriceCents,
     discountCents: quote.discountCents,
