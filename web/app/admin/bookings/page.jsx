@@ -10,6 +10,7 @@ import Shell from "@/components/Shell";
 import StatusBadge from "@/components/StatusBadge";
 import { api, fmtDate, money, moneyCents } from "@/lib/api";
 import { cashActionsFor, classifyCashError, collectPayload } from "@/lib/cashAdmin";
+import { BOOKING_TABS, DEFAULT_TAB, EMPTY_STATE_TEXT, filterBySession, countBySession } from "@/lib/bookingsTabs";
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -24,15 +25,16 @@ const links = [
   { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
 ];
 
-const SESSIONS = [
-  { id: "pending", label: "Pending requests", icon: Inbox },
-  { id: "worked", label: "Accepted & Worked", icon: CheckCircle2 },
-  { id: "declined", label: "Declined", icon: ThumbsDown },
-];
+const SESSION_ICONS = {
+  all: Inbox,
+  pending: Inbox,
+  worked: CheckCircle2,
+  declined: ThumbsDown,
+};
 
 export default function AdminBookingsPage() {
   const [bookings, setBookings] = useState([]);
-  const [session, setSession] = useState("pending");
+  const [session, setSession] = useState(DEFAULT_TAB);
   const [busyId, setBusyId] = useState(null);
   const [confirm, setConfirm] = useState(null); // { booking, action: "collect" | "refund" }
   const [notice, setNotice] = useState("");
@@ -116,27 +118,19 @@ export default function AdminBookingsPage() {
     }
   };
 
-  const shown = bookings.filter((b) => {
-    if (session === "pending") return b.status === "pending";
-    if (session === "worked") return b.status === "accepted" || b.status === "worked";
-    if (session === "declined") return b.status === "declined";
-    return true;
-  });
+  const shown = filterBySession(bookings, session);
+  const counts = countBySession(bookings);
 
   return (
     <Shell links={links} sections={["Admin Portal"]} title="Booking Management"
-      subtitle="Accept or decline requests. Completed jobs live in 'Accepted & Worked'.">
+      subtitle="All bookings are grouped into tabs by status. Newly paid online bookings appear under Accepted & Worked.">
       <div className="flex flex-wrap gap-2 mb-6">
-        {SESSIONS.map((s) => {
-          const count = s.id === "pending"
-            ? bookings.filter((b) => b.status === "pending").length
-            : s.id === "worked"
-              ? bookings.filter((b) => b.status === "accepted" || b.status === "worked").length
-              : bookings.filter((b) => b.status === "declined").length;
+        {BOOKING_TABS.map((s) => {
+          const Icon = SESSION_ICONS[s.id];
           return (
             <button key={s.id} className={`tab-btn ${session === s.id ? "tab-btn-active" : ""}`} onClick={() => setSession(s.id)}>
-              <s.icon size={14} className="inline -mt-0.5 mr-1.5" />
-              {s.label} <span className="ml-1 opacity-70">({count})</span>
+              {Icon ? <Icon size={14} className="inline -mt-0.5 mr-1.5" /> : null}
+              {s.label} <span className="ml-1 opacity-70">({counts[s.id]})</span>
             </button>
           );
         })}
@@ -148,7 +142,7 @@ export default function AdminBookingsPage() {
       {shown.length === 0 ? (
         <div className="card empty-state">
           <Inbox size={36} className="mx-auto text-slate-300" />
-          <p className="mt-3 font-semibold text-ink">No bookings in this session.</p>
+          <p className="mt-3 font-semibold text-ink">{EMPTY_STATE_TEXT[session] || "No bookings in this session."}</p>
         </div>
       ) : (
         <div className="card overflow-hidden">

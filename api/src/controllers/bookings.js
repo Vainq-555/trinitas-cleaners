@@ -5,6 +5,7 @@ import { dollarsToCents } from "../utils/money.js";
 import { calculatePreTaxQuote } from "../utils/promotions.js";
 import { promotionSnapshot } from "../utils/pricing.js";
 import { claimPromotionUsage } from "../utils/promotionUsage.js";
+import { normalizeServiceAddress } from "../utils/serviceAddress.js";
 
 const bookingInclude = {
   service: true,
@@ -44,7 +45,17 @@ export async function createBooking(req, res) {
   });
   const preTaxQuote = calculatePreTaxQuote({ basePriceCents, promotions, serviceId: service.id, promoCode });
   if (promoCode && !preTaxQuote.promotion) return badRequest(res, "That promotion code is invalid or unavailable");
-  const address = serviceAddress || {};
+  // Structural validation of any submitted service address BEFORE persist, so
+  // a malformed address can never block later Stripe Tax calculation. This is
+  // syntax-only; it does not compute tax. A missing address is still allowed
+  // (tax is then captured at checkout/collection as before).
+  const normalizedAddress = serviceAddress
+    ? normalizeServiceAddress(serviceAddress)
+    : null;
+  if (normalizedAddress && !normalizedAddress.ok) {
+    return badRequest(res, normalizedAddress.error);
+  }
+  const address = normalizedAddress ? normalizedAddress.address : {};
   const snapshot = promotionSnapshot(preTaxQuote);
   let booking;
   try {
