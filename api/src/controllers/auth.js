@@ -3,6 +3,11 @@ import { hashPassword, verifyPassword } from "../utils/password.js";
 import { signToken } from "../utils/jwt.js";
 import { COOKIE_NAME, COOKIE_SECURE, ROLES } from "../config.js";
 import { badRequest, isEmail } from "../utils/validators.js";
+import { createRecoveryRateLimiters } from "../utils/rateLimit.js";
+import { requestPasswordReset, performPasswordReset, isValidNewPassword } from "../utils/passwordRecovery.js";
+
+// Lightweight in-memory rate limiter for the recovery flow (see rateLimit.js).
+const recoveryLimits = createRecoveryRateLimiters();
 
 const publicUser = (u) => ({
   id: u.id,
@@ -118,5 +123,61 @@ export async function deleteAccount(req, res) {
   }
   await prisma.user.delete({ where: { id: req.user.id } });
   res.clearCookie(COOKIE_NAME, { path: "/" });
+  res.json({ ok: true });
+}
+
+// POST /api/auth/forgot-password
+// Enumeration-safe: returns the same message whether or not the email exists.
+// Rate-limited per IP and per normalized email (sliding window; no permanent
+// block). Never returns or logs the raw token.
+export async function forgotPassword(req, res) {
+  const { email } = req.body || {};
+
+  if (!isEmail(email)) {
+    // Keep the response shape consistent with the public message.
+    return badRequest(res, "Email and password are required");
+  }
+
+  const normalized = email.trim().toLowerCase();
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+
+  if (!recoveryLimits.byIp.allow(ip)) {
+    return res.status(429).json({ error: "Too many requests. Please try again later." });
+  }
+  if (!recoveryLimits.byEmail.allow(normalized)) {
+    return res.status(429).json({ error: "Too many requests for this email. Please try again later." });
+  }
+
+  recoveryLimits.byIp.record(ip);
+  recoveryLimits.byEmail.record(normalized);
+
+  // requestPasswordReset never rejects for account existence and always returns
+  // the same public message regardless of delivery outcome.
+  const result = await requestPasswordReset(normalized);
+  res.json({ message: result.message });
+}
+
+// POST /api/auth/reset-password
+// Redeems a single-use raw token. Safe fail messages only; never reveals
+// whether a token was previously valid, never leaks tokens or passwords.
+export async function resetPassword(req, res) {
+  const { token, password } = req.body || {};
+
+  if (!token) {
+    return res.status(400).json({ error: "Invalid or expired reset link" });
+  }
+  if (!isValidNewPassword(password)) {
+    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  }
+  if (req.body.confirm && password !== req.body.confirm) {
+    return res.status(400).json({ error: "Passwords do not match" });
+  }
+
+  const result = await performPasswordReset(token, password);
+  if (!result.ok) {
+    // Invalid / expired / already-used tokens all fail identically.
+    return res.status(result.status || 400).json({ error: "Invalid or expired reset link" });
+  }
+
   res.json({ ok: true });
 }

@@ -24,6 +24,8 @@ router.get("/broadcasts/public", broadcasts.listPublicBroadcasts);
 // ---------- Auth ----------
 router.post("/auth/register", auth.register);
 router.post("/auth/login", auth.login);
+router.post("/auth/forgot-password", auth.forgotPassword);
+router.post("/auth/reset-password", auth.resetPassword);
 router.post("/auth/logout", authenticate, auth.logout);
 router.get("/auth/me", authenticate, auth.me);
 router.post("/auth/heartbeat", authenticate, auth.heartbeat);

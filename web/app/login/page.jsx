@@ -61,6 +61,9 @@ export default function LoginPage() {
                   <input className="input !pl-10" type="password" required value={password}
                     onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
                 </div>
+                <div className="mt-2 text-right text-sm">
+                  <Link href="/forgot-password" className="font-semibold text-brand hover:underline">Forgot password?</Link>
+                </div>
               </div>
               <button className="btn btn-primary w-full !py-3" disabled={busy}>
                 <LogIn size={16} /> {busy ? "Logging in…" : "Log in"}

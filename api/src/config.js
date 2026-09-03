@@ -23,3 +23,11 @@ export const ONLINE_TTL_MS = 5 * 60 * 1000;
 export const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 export const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 export const PUBLIC_WEB_URL = process.env.PUBLIC_WEB_URL || "http://localhost:3000";
+
+// Email delivery (password recovery). RESEND_API_KEY and EMAIL_FROM must be set
+// in production; see api/.env.example. These value NAMES are committed, never
+// the secrets themselves.
+export const EMAIL_PROVIDER = process.env.EMAIL_PROVIDER || "resend";
+export const RESEND_API_KEY = process.env.RESEND_API_KEY;
+export const EMAIL_FROM = process.env.EMAIL_FROM;
+export const EMAIL_REPLY_TO = process.env.EMAIL_REPLY_TO;

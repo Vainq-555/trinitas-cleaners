@@ -36,6 +36,7 @@ model User {
   customPrices   CustomPrice[]
   broadcastReads UserBroadcastRead[]
   broadcasts     Broadcast[]
+  passwordResets PasswordResetToken[]
 
   @@index([role])
 }
@@ -244,4 +245,20 @@ model UserBroadcastRead {
   broadcast Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
 
   @@id([userId, broadcastId])
+}
+
+// Password recovery. Only the SHA-256 hash of the raw reset token is stored;
+// the raw token exists solely in the emailed reset URL.
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
