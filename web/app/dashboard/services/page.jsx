@@ -48,15 +48,15 @@ export default function ServicesPage() {
       const result = await useMyLocation({ geolocation: typeof navigator !== "undefined" ? navigator.geolocation : null, fetchImpl: (path) => api(path) });
       if (result?.ok && result.address) {
         setAddress({ country: "US", ...result.address });
-        setLocNote("Address filled from your current location — please review and edit before booking.");
+        setLocNote("Address filled from your current location — please review and confirm your address before booking.");
       } else if (result?.address) {
         setAddress({ country: "US", ...address, ...result.address });
-        setLocNote(result?.message || "Please review and correct the address.");
+        setLocNote(result?.message || "Please review and correct your address manually.");
       } else {
-        setLocNote(result?.message || "We couldn't use your current location. Please enter your address manually.");
+        setLocNote(result?.message || "Unable to determine your address automatically. Please enter your address manually.");
       }
     } catch {
-      setLocNote("We couldn't use your current location. Please enter your address manually.");
+      setLocNote("Unable to determine your address automatically. Please enter your address manually.");
     } finally {
       setLocating(false);
     }
@@ -158,7 +158,11 @@ export default function ServicesPage() {
                   <button type="button" className="btn btn-outline btn-sm" onClick={useLocation} disabled={locating}>
                     {locating ? "Finding your location…" : "📍 Use my current location"}
                   </button>
-                  {locNote && <p className="text-xs text-muted" role="status">{locNote}</p>}
+                  {locNote && (
+                    <div className="mt-2 rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900" role="alert">
+                      {locNote}
+                    </div>
+                  )}
                 </div>
                 <p className="mt-1 text-xs text-muted">Tax is calculated by Stripe for this location. No estimated rate is used.</p>
               </div>

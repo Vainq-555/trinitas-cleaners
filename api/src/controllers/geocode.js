@@ -4,7 +4,8 @@ const NOMINATIM_URL =
   process.env.NOMINATIM_URL || "https://nominatim.openstreetmap.org/reverse";
 
 const NOMINATIM_USER_AGENT =
-  process.env.NOMINATIM_USER_AGENT || "trinitas-cleaners/1.0 (booking address assistance)";
+  process.env.NOMINATIM_USER_AGENT ||
+  "trinitas-cleaners/1.0 (https://web.trinitaso.com; support@trinitaso.com)";
 
 // Server-side reverse geocoding via Nominatim (OpenStreetMap). No API key is
 // used, so no secret ever reaches the browser. The result is returned only as

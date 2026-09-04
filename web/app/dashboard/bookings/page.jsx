@@ -99,15 +99,15 @@ export default function BookingsPage() {
       const result = await useMyLocation({ geolocation: typeof navigator !== "undefined" ? navigator.geolocation : null, fetchImpl: (path) => api(path) });
       if (result?.ok && result.address) {
         setServiceAddress({ country: "US", ...result.address });
-        setLocNote("Address filled from your current location — please review and edit before continuing.");
+        setLocNote("Address filled from your current location — please review and confirm your address before continuing.");
       } else if (result?.address) {
         setServiceAddress({ country: "US", ...serviceAddress, ...result.address });
-        setLocNote(result?.message || "Please review and correct the address.");
+        setLocNote(result?.message || "Please review and correct your address manually.");
       } else {
-        setLocNote(result?.message || "We couldn't use your current location. Please enter your address manually.");
+        setLocNote(result?.message || "Unable to determine your address automatically. Please enter your address manually.");
       }
     } catch {
-      setLocNote("We couldn't use your current location. Please enter your address manually.");
+      setLocNote("Unable to determine your address automatically. Please enter your address manually.");
     } finally {
       setLocating(false);
     }
@@ -155,7 +155,11 @@ export default function BookingsPage() {
             <button type="button" className="btn btn-outline btn-sm" onClick={useLocation} disabled={locating}>
               {locating ? "Finding your location…" : "📍 Use my current location"}
             </button>
-            {locNote && <p className="text-xs text-muted" role="status">{locNote}</p>}
+            {locNote && (
+              <div className="mt-2 rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900" role="alert">
+                {locNote}
+              </div>
+            )}
           </div>
           <button className="btn btn-primary mt-4" disabled={!addressBookingId || paying !== null}>Calculate tax and review total</button>
         </form>
