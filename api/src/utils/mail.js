@@ -119,3 +119,110 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+// ==== BOOKING CONFIRMATION EMAIL ====
+
+// Sends a booking confirmation email after a successful payment.
+// - booking: the Prisma Booking record
+// - stripeEventId: optional Stripe event ID (for online payments) — used for duplicate protection
+// - prisma: Prisma client instance (optional — note update is skipped if not provided)
+export async function sendBookingConfirmationEmail(booking, stripeEventId, prisma) {
+  // --- Duplicate‑email check (online only) ---
+  if (stripeEventId && booking.note?.includes(`stripe_event:${stripeEventId}`)) {
+    return { sent: false, reason: 'duplicate' };
+  }
+
+  // --- Build email content from actual booking fields ---
+  const customer = prisma?.booking?.findUnique?.({
+    where: { id: booking.id },
+    include: { customer: true },
+  });
+  const custName = customer?.name || 'Customer';
+  const service = booking.service?.name || 'Service';
+  const date = new Date(booking.date).toLocaleString('en‑US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const address = booking.taxAddressLine1
+    ? `${booking.taxAddressLine1}${booking.taxAddressLine2 ? ' ' + booking.taxAddressLine2 : ''}`
+    : '—';
+  const cityStatePostal = `${booking.taxAddressCity}, ${booking.taxAddressState} ${booking.taxAddressPostalCode}`;
+  const country = booking.taxAddressCountry || '—';
+  const priceInfo =`
+    Base: $${(booking.basePriceCents / 100).toFixed(2)}
+    Discount: $${(booking.discountCents / 100).toFixed(2) || 0}
+    Tax: $${(booking.taxCents / 100).toFixed(2)}
+    **Total: $${(booking.finalAmountCents / 100).toFixed(2)}**`;
+
+  const text = [
+    'Trinitas‑Cleaners Booking Confirmation',
+    '================================',
+    `Customer: ${custName}`,
+    `Service: ${service}`,
+    `Date/Time: ${date}`,
+    `Address: ${address}`,
+    `${cityStatePostal}, ${country}`,
+    '',
+    'Price Details',
+    priceInfo,
+    `Payment Method: ${booking.payment?.method || '—'}`,
+    `Payment Status: ${booking.payment?.status || '—'}`,
+    '',
+    'Please log in to your dashboard to view or modify your booking.',
+    `${PUBLIC_WEB_URL}/dashboard/bookings`,
+    '— Trinitas‑Cleaners',
+  ].join('\n');
+
+  const html = `<!doctype html>
+  <html>
+  <body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;">
+    <h2>Your Trinitas‑Cleaners Booking Confirmation</h2>
+    <p>Dear ${custName},</p>
+    <p>Thank you for your booking. Below are the details of your reservation:</p>
+    <ul>
+      <li><strong>Service:</strong> ${service}</li>
+      <li><strong>Date/Time:</strong> ${date}</li>
+      <li><strong>Address:</strong> ${address}</li>
+      <li><strong>Price Details:</strong><br/>${priceInfo}</li>
+      <li><strong>Payment Method:</strong> ${booking.payment?.method || '—'}</li>
+      <li><strong>Payment Status:</strong> ${booking.payment?.status || '—'}</li>
+    </ul>
+    <p>You can manage your booking at <a href="${PUBLIC_WEB_URL}/dashboard/bookings">your dashboard</a>.</p>
+    <p>If you have any questions, please reply to this email.</p>
+    <p>— Trinitas‑Cleaners</p>
+  </body>
+  </html>`;
+
+  // --- Send via existing Resend transport ---
+  try {
+    await sendEmail({
+      to: booking.customer?.email || 'customer@example.com',
+      from: EMAIL_FROM,
+      replyTo: EMAIL_REPLY_TO,
+      subject: 'Your Trinitas‑Cleaners Booking Confirmation',
+      html,
+      text,
+    });
+
+    // --- Duplicate‑email protection (online only) ---
+    if (stripeEventId) {
+      await prisma?.booking.update({
+        where: { id: booking.id },
+        data: { note: `${booking.note ?? ''} | stripe_event:${stripeEventId}` },
+      });
+    }
+
+    return { sent: true, reason: null };
+  } catch (err) {
+    // Log safely — no secrets, no raw tokens
+    console.error('[booking confirmation] email failed', {
+      bookingId: booking.id,
+      error: err?.message ?? 'unknown error',
+    });
+    return { sent: false, reason: err?.message ?? 'send failed' };
+  }
+}
+
+// =============================================================================

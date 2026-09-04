@@ -115,6 +115,17 @@ export async function collectCashPayment(req, res, deps = {}) {
       const receipt = await snapshotReceipt(tx, updatedBooking, updatedPayment);
       return { booking: updatedBooking, payment: updatedPayment, receipt };
     });
+    try {
+      const booking = await prisma.booking.findUnique({ where: { id: booking.id } });
+      if (booking) {
+        await sendBookingConfirmationEmail(booking, null, prisma);
+      }
+    } catch (emailError) {
+      console.error('[booking confirmation email] cash collect', {
+        error: emailError?.message ?? 'unknown error',
+        bookingId: booking.id,
+      });
+    }
     return res.json({
       ok: true,
       bookingId: booking.id,

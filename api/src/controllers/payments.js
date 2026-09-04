@@ -287,8 +287,19 @@ export async function stripeWebhook(req, res) {
       console.error("Stripe webhook amount mismatch — payment left unchanged", error.details);
       return res.status(409).json({ error: "Payment amount mismatch; event not applied" });
     }
-    console.error("Stripe webhook processing failed", error);
-    return res.status(500).json({ error: "Webhook processing failed" });
+console.error("Stripe webhook processing failed", error);
+  return res.status(500).json({ error: "Webhook processing failed" });
+}
+try {
+  const booking = await prisma.booking.findUnique({ where: { id: event.metadata?.bookingId } });
+  if (booking) {
+    await sendBookingConfirmationEmail(booking, event.id, prisma);
   }
-  res.json({ received: true });
+} catch (emailError) {
+  console.error('[booking confirmation email] stripe webhook', {
+    error: emailError?.message ?? 'unknown error',
+    bookingId: event.metadata?.bookingId,
+  });
+}
+res.json({ received: true });
 }
