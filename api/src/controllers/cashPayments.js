@@ -4,6 +4,7 @@ import { badRequest } from "../utils/validators.js";
 import { STRIPE_SECRET_KEY } from "../config.js";
 import { centsToLegacyDollars } from "../utils/money.js";
 import { TaxAddressRequiredError, TaxUnavailableError } from "../utils/tax.js";
+import { sendBookingConfirmationEmail } from "../utils/mail.js";
 import {
   assertPaidAmountMatches,
   bookingAddress,
@@ -116,7 +117,10 @@ export async function collectCashPayment(req, res, deps = {}) {
       return { booking: updatedBooking, payment: updatedPayment, receipt };
     });
     try {
-      const booking = await prisma.booking.findUnique({ where: { id: booking.id } });
+      const booking = await prisma.booking.findUnique({
+        where: { id: booking.id },
+        include: { customer: true, service: true, payment: true },
+      });
       if (booking) {
         await sendBookingConfirmationEmail(booking, null, prisma);
       }

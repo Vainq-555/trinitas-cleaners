@@ -122,23 +122,22 @@ function escapeHtml(s) {
 // ==== BOOKING CONFIRMATION EMAIL ====
 
 // Sends a booking confirmation email after a successful payment.
-// - booking: the Prisma Booking record
+// - booking: the Prisma Booking record (must include customer, service, payment)
 // - stripeEventId: optional Stripe event ID (for online payments) — used for duplicate protection
 // - prisma: Prisma client instance (optional — note update is skipped if not provided)
-export async function sendBookingConfirmationEmail(booking, stripeEventId, prisma) {
+// - transport: injectable mail transport for tests (defaults to resendTransport)
+export async function sendBookingConfirmationEmail(booking, stripeEventId, prisma, transport) {
   // --- Duplicate‑email check (online only) ---
   if (stripeEventId && booking.note?.includes(`stripe_event:${stripeEventId}`)) {
     return { sent: false, reason: 'duplicate' };
   }
 
-  // --- Build email content from actual booking fields ---
-  const customer = prisma?.booking?.findUnique?.({
-    where: { id: booking.id },
-    include: { customer: true },
-  });
-  const custName = customer?.name || 'Customer';
+  // --- Build email content from actual booking fields. The caller loads the
+  // booking with the customer/service/payment relations, so no extra query is
+  // needed here; the customer name falls back to a generic greeting. ---
+  const custName = booking.customer?.name || 'Customer';
   const service = booking.service?.name || 'Service';
-  const date = new Date(booking.date).toLocaleString('en‑US', {
+  const date = new Date(booking.date).toLocaleString("en-US", {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -204,6 +203,7 @@ export async function sendBookingConfirmationEmail(booking, stripeEventId, prism
       subject: 'Your Trinitas‑Cleaners Booking Confirmation',
       html,
       text,
+      transport,
     });
 
     // --- Duplicate‑email protection (online only) ---

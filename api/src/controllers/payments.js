@@ -7,6 +7,7 @@ import { calculatePreTaxQuote } from "../utils/promotions.js";
 import { calculateStripeTax, TaxAddressRequiredError, TaxUnavailableError } from "../utils/tax.js";
 import { calculateFinalQuote, promotionSnapshot } from "../utils/pricing.js";
 import { claimPromotionUsage } from "../utils/promotionUsage.js";
+import { sendBookingConfirmationEmail } from "../utils/mail.js";
 
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 const paymentInclude = { service: true, customer: { select: { name: true, email: true } }, payment: true };
@@ -264,6 +265,27 @@ async function processEvent(tx, event) {
   }
 }
 
+// Sends the booking confirmation email after a successful online payment.
+// Callers load the booking with the relations the email renders, so no extra
+// query is issued here. Only paid checkout states trigger an email:
+// checkout.session.completed with payment_status "paid" and
+// checkout.session.async_payment_succeeded. deps allow tests to inject a fake
+// db and mail sender.
+export async function sendPaidBookingConfirmation(event, deps = {}) {
+  const { db = prisma, sendConfirmation = sendBookingConfirmationEmail } = deps;
+  const data = event.data?.object ?? {};
+  const bookingId = data.metadata?.bookingId;
+  if (!bookingId) return { sent: false, reason: "missing-booking-id" };
+
+  const isPaidCheckout = event.type === "checkout.session.async_payment_succeeded" ||
+    (event.type === "checkout.session.completed" && data.payment_status === "paid");
+  if (!isPaidCheckout) return { sent: false, reason: "unpaid-checkout-state" };
+
+  const booking = await db.booking.findUnique({ where: { id: bookingId }, include: paymentInclude });
+  if (!booking) return { sent: false, reason: "booking-not-found" };
+  return sendConfirmation(booking, event.id, db);
+}
+
 export async function stripeWebhook(req, res) {
   if (!stripe || !STRIPE_WEBHOOK_SECRET) {
     console.error("Stripe webhook received but not configured", { hasStripe: Boolean(stripe), hasSecret: Boolean(STRIPE_WEBHOOK_SECRET) });
@@ -287,19 +309,16 @@ export async function stripeWebhook(req, res) {
       console.error("Stripe webhook amount mismatch — payment left unchanged", error.details);
       return res.status(409).json({ error: "Payment amount mismatch; event not applied" });
     }
-console.error("Stripe webhook processing failed", error);
-  return res.status(500).json({ error: "Webhook processing failed" });
-}
-try {
-  const booking = await prisma.booking.findUnique({ where: { id: event.metadata?.bookingId } });
-  if (booking) {
-    await sendBookingConfirmationEmail(booking, event.id, prisma);
+    console.error("Stripe webhook processing failed", error);
+    return res.status(500).json({ error: "Webhook processing failed" });
   }
-} catch (emailError) {
-  console.error('[booking confirmation email] stripe webhook', {
-    error: emailError?.message ?? 'unknown error',
-    bookingId: event.metadata?.bookingId,
-  });
-}
-res.json({ received: true });
+  try {
+    await sendPaidBookingConfirmation(event);
+  } catch (emailError) {
+    console.error('[booking confirmation email] stripe webhook', {
+      error: emailError?.message ?? 'unknown error',
+      bookingId: event.data?.object?.metadata?.bookingId,
+    });
+  }
+  return res.json({ received: true });
 }
