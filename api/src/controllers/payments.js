@@ -120,6 +120,9 @@ export async function createCheckout(req, res) {
   if (!booking || booking.customerId !== req.user.id) return res.status(404).json({ error: "Booking not found" });
   if (!booking.payment || booking.payment.method !== "online") return badRequest(res, "This booking is not an online payment");
   if (["paid", "refunded"].includes(booking.payment.status)) return badRequest(res, `This booking's payment is already ${booking.payment.status} and cannot be paid again`);
+  if (booking.status !== "accepted") {
+    return res.status(409).json({ error: "Booking must be approved before payment", code: "BOOKING_NOT_APPROVED" });
+  }
   console.info("Checkout stored service address", addressDiagnostics(bookingAddress(booking)));
 
   let quote;
@@ -224,7 +227,7 @@ export async function createSnapshotReceipt(tx, booking, payment) {
   return tx.receipt.create({ data });
 }
 
-async function processEvent(tx, event) {
+export async function processEvent(tx, event) {
   const data = event.data.object;
   const bookingId = data.metadata?.bookingId;
   const paymentWhere = bookingId ? { bookingId } : data.id.startsWith("cs_") ? { stripeCheckoutSessionId: data.id } : { stripePaymentIntentId: data.payment_intent || data.id };
@@ -253,7 +256,9 @@ async function processEvent(tx, event) {
     const updated = await tx.payment.update({ where: { id: payment.id }, data: { status: "paid", amountPaidCents: receivedCents, amountPaid: centsToLegacyDollars(receivedCents), paidAt: new Date(), stripePaymentIntentId: typeof data.payment_intent === "string" ? data.payment_intent : payment.stripePaymentIntentId } });
     const booking = await tx.booking.findUnique({ where: { id: payment.bookingId } });
     if (booking) {
-      if (booking.status === "pending") await tx.booking.update({ where: { id: booking.id }, data: { status: "accepted" } });
+      if (booking.status !== "accepted") {
+        console.warn("Stripe webhook: paid checkout received for a booking that was not accepted — approval not granted by payment", { eventId: event.id, eventType: event.type, bookingId: booking.id, bookingStatus: booking.status });
+      }
       await createSnapshotReceipt(tx, booking, updated);
     }
   } else if (event.type === "checkout.session.expired") {

@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import ServiceCard from "@/components/ServiceCard";
-import { api, money, moneyCents } from "@/lib/api";
+import { api, money } from "@/lib/api";
 import { useMyLocation } from "@/lib/geo";
 
 const links = [
@@ -34,7 +34,6 @@ export default function ServicesPage() {
   const [locNote, setLocNote] = useState("");
   const [address, setAddress] = useState({ line1: "", city: "", state: "", postalCode: "", country: "US" });
   const [promoCode, setPromoCode] = useState("");
-  const [quote, setQuote] = useState(null);
 
   useEffect(() => {
     api("/services").then((d) => setServices(d.services)).catch(() => {});
@@ -68,13 +67,10 @@ export default function ServicesPage() {
     setError("");
     setOk("");
     try {
-      const result = await api("/bookings", { method: "POST", body: { serviceId: selected.id, date, note, paymentMethod, promoCode: promoCode.trim() || undefined, serviceAddress: address } });
-      if (paymentMethod === "online") {
-        const preview = await api(`/bookings/${result.booking.id}/checkout`, { method: "POST", body: { serviceAddress: address } });
-        setQuote({ bookingId: result.booking.id, serviceAddress: address, ...preview.quote });
-        return;
-      }
-      setOk("Booking requested! We'll confirm shortly.");
+      await api("/bookings", { method: "POST", body: { serviceId: selected.id, date, note, paymentMethod, promoCode: promoCode.trim() || undefined, serviceAddress: address } });
+      setOk(paymentMethod === "online"
+        ? "Booking submitted. Your booking is awaiting approval. You'll be able to pay once it is approved."
+        : "Booking requested! We'll confirm shortly.");
       setSelected(null);
       setDate("");
       setNote("");
@@ -83,19 +79,6 @@ export default function ServicesPage() {
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy(false);
-    }
-  };
-
-  const approveQuote = async () => {
-    if (!quote) return;
-    setBusy(true);
-    setError("");
-    try {
-      const checkout = await api(`/bookings/${quote.bookingId}/checkout`, { method: "POST", body: { confirm: true, approvedFinalAmountCents: quote.finalAmountCents, serviceAddress: quote.serviceAddress } });
-      window.location.assign(checkout.url);
-    } catch (err) {
-      setError(err.message);
       setBusy(false);
     }
   };
@@ -186,7 +169,7 @@ export default function ServicesPage() {
                   <label className={`cursor-pointer rounded-xl border px-4 py-3 ${paymentMethod === "online" ? "border-brand bg-brand-light" : "border-line"}`}>
                     <input className="mr-2" type="radio" name="paymentMethod" value="online" checked={paymentMethod === "online"} onChange={(e) => setPaymentMethod(e.target.value)} />
                     <span className="font-semibold text-ink">Pay online</span>
-                    <span className="block pl-6 text-xs text-muted">Secure Stripe Checkout</span>
+                    <span className="block pl-6 text-xs text-muted">Secure Stripe Checkout after approval</span>
                   </label>
                   <label className={`cursor-pointer rounded-xl border px-4 py-3 ${paymentMethod === "cash" ? "border-brand bg-brand-light" : "border-line"}`}>
                     <input className="mr-2" type="radio" name="paymentMethod" value="cash" checked={paymentMethod === "cash"} onChange={(e) => setPaymentMethod(e.target.value)} />
@@ -196,16 +179,9 @@ export default function ServicesPage() {
                 </div>
               </div>
               <button className="btn btn-primary w-full !py-3" disabled={busy}>
-                {busy ? "Requesting…" : paymentMethod === "online" ? "Continue to secure payment" : "Request booking"}
+                {busy ? "Requesting…" : "Request booking"}
               </button>
             </form>
-            {quote && (
-              <div className="mt-5 rounded-xl border-2 border-brand bg-brand-light p-4">
-                <h3 className="font-bold text-ink">Review before Stripe Checkout</h3>
-                <div className="mt-3 space-y-1 text-sm"><div className="flex justify-between"><span>Service price</span><span>{moneyCents(quote.basePriceCents)}</span></div><div className="flex justify-between text-clean"><span>Discount</span><span>− {moneyCents(quote.discountCents)}</span></div><div className="flex justify-between border-t border-line pt-1"><span>Taxable subtotal</span><span>{moneyCents(quote.taxableSubtotalCents)}</span></div><div className="flex justify-between"><span>Sales tax</span><span>{moneyCents(quote.taxCents)}</span></div><div className="mt-2 flex justify-between border-t-2 border-ink pt-2 text-lg font-extrabold"><span>FINAL TOTAL</span><span>{moneyCents(quote.finalAmountCents)}</span></div></div>
-                <div className="mt-4 flex gap-2"><button className="btn btn-primary" disabled={busy} onClick={approveQuote}>{busy ? "Opening checkout…" : `Pay ${moneyCents(quote.finalAmountCents)}`}</button><button className="btn btn-outline" disabled={busy} onClick={() => setQuote(null)}>Cancel</button></div>
-              </div>
-            )}
           </div>
         </div>
       )}

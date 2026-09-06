@@ -223,10 +223,16 @@ export default function BookingsPage() {
                     </td>
                     <td className="text-muted text-xs max-w-[180px] truncate">{b.note || "—"}</td>
                     <td className="text-right">
-                      {b.payment?.method === "online" && !["paid", "refunded"].includes(b.payment?.status) && (
+                      {b.payment?.method === "online" && b.status === "accepted" && !["paid", "refunded"].includes(b.payment?.status) && (
                         <button className="btn btn-primary btn-sm mr-2" disabled={paying === b.id} onClick={() => pay(b.id)}>
-                          <CalendarPlus size={14} /> {b.payment?.status === "pending" ? "Pay now" : "Retry payment"}
+                          <CalendarPlus size={14} /> Pay now
                         </button>
+                      )}
+                      {b.payment?.method === "online" && b.status === "pending" && (
+                        <span className="mr-2 inline-flex items-center text-xs font-semibold text-amber-700">Awaiting approval</span>
+                      )}
+                      {b.payment?.method === "online" && b.status === "declined" && (
+                        <span className="mr-2 inline-flex items-center text-xs font-semibold text-danger">Not approved</span>
                       )}
                       {b.status === "pending" && (
                         <button className="btn btn-danger btn-sm" onClick={() => remove(b.id)}>
