@@ -129,7 +129,7 @@ export default function BookingsPage() {
   };
 
   const remove = async (id) => {
-    if (!confirm("Delete this booking? This cannot be undone.")) return;
+    if (!confirm("Archive this Worked booking? This will remove it from your normal booking history. This action cannot be undone.")) return;
     try {
       await api(`/bookings/${id}`, { method: "DELETE" });
       load();
@@ -234,7 +234,7 @@ export default function BookingsPage() {
                       {b.payment?.method === "online" && b.status === "declined" && (
                         <span className="mr-2 inline-flex items-center text-xs font-semibold text-danger">Not approved</span>
                       )}
-                      {b.status === "pending" && (
+                      {b.status === "worked" && !b.archivedAt && (
                         <button className="btn btn-danger btn-sm" onClick={() => remove(b.id)}>
                           <Trash2 size={14} /> Delete
                         </button>

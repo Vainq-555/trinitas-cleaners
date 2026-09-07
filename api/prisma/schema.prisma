@@ -69,15 +69,16 @@ model CustomPrice {
 }
 
 model Booking {
-  id         String   @id @default(cuid())
-  customerId String
-  serviceId  String
-  date       DateTime
-  note       String?
+  id              String     @id @default(cuid())
+  customerId      String
+  serviceId       String
+  date            DateTime
+  note            String?
   // "pending" | "accepted" | "declined" | "worked"
-  status     String   @default("pending")
-  price      Float // price quoted at booking time (after any override)
-  createdAt  DateTime @default(now())
+  status          String     @default("pending")
+  price           Float      // price quoted at booking time (after any override)
+  createdAt       DateTime   @default(now())
+  archivedAt      DateTime?  // set when a Worked booking is archived; null = active
 
   // Additive cents snapshot. Legacy Float fields remain unchanged.
   basePriceCents                 Int?

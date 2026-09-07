@@ -116,23 +116,33 @@ export async function deleteBooking(req, res) {
   const { id } = req.params;
   const booking = await prisma.booking.findUnique({ where: { id }, include: { payment: true } });
   if (!booking) return res.status(404).json({ error: "Booking not found" });
-  if (booking.customerId !== req.user.id && req.user.role !== "admin") {
-    return res.status(403).json({ error: "You can only delete your own bookings" });
+
+  // Only Worked bookings may be archived.
+  if (booking.status !== "worked") {
+    return res.status(403).json({ error: "Only Worked bookings may be archived" });
   }
-  // A paid booking must not be deleted: deleting it cascades to the Payment
-  // record, losing the record of collected funds without any refund flow.
-  if (req.user.role !== "admin" && booking.payment?.status === "paid") {
-    return res.status(403).json({
-      error: "This booking has already been paid and cannot be deleted. Contact us if you need to change or cancel it.",
-    });
+
+  // If already archived, idempotently return success.
+  if (booking.archivedAt !== null) {
+    return res.json({ ok: true });
   }
-  await prisma.booking.delete({ where: { id } });
+
+  // Customer may archive only their own Worked booking.
+  // Admin may archive any Worked booking.
+  if (req.user.role !== "admin" && booking.customerId !== req.user.id) {
+    return res.status(403).json({ error: "You can only archive your own bookings" });
+  }
+
+  await prisma.booking.update({
+    where: { id },
+    data: { archivedAt: new Date() },
+  });
   res.json({ ok: true });
 }
 
 export async function listMyBookings(req, res) {
   const bookings = await prisma.booking.findMany({
-    where: { customerId: req.user.id },
+    where: { customerId: req.user.id, archivedAt: null },
     orderBy: { createdAt: "desc" },
     include: bookingInclude,
   });
@@ -143,7 +153,9 @@ export async function listMyBookings(req, res) {
 
 export async function adminListBookings(req, res) {
   const { status } = req.query;
-  const where = status && isValidBookingStatus(status) ? { status } : {};
+  const where = status && isValidBookingStatus(status)
+    ? { status, archivedAt: null }
+    : { archivedAt: null };
   const bookings = await prisma.booking.findMany({
     where,
     orderBy: { createdAt: "desc" },
