@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { use, useEffect, useState } from "react";
 import {
   Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings,
   Printer, Download, ArrowLeft, Sparkles as SparkleIcon,
@@ -19,15 +19,16 @@ const links = [
 ];
 
 export default function ReceiptDetailPage({ params }) {
+  const { id } = use(params);
   const [receipt, setReceipt] = useState(null);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    api("/receipts/" + params.id).then((r) => {
+    api("/receipts/" + id).then((r) => {
       setReceipt(r.receipt);
       setNotFound(false);
     }).catch(() => setNotFound(true));
-  }, [params.id]);
+  }, [id]);
 
   return (
     <Shell links={links} sections={["Customer Portal"]} title="Receipt"
@@ -36,7 +37,7 @@ export default function ReceiptDetailPage({ params }) {
         <button className="btn btn-outline" onClick={() => window.print()}>
           <Printer size={16} /> Print
         </button>
-        <a className="btn btn-primary" href={`/api/receipts/${params.id}/pdf`} target="_blank" rel="noreferrer">
+        <a className="btn btn-primary" href={`/api/receipts/${id}/pdf`} target="_blank" rel="noreferrer">
           <Download size={16} /> Download PDF
         </a>
       </div>
