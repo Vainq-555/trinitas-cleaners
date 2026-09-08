@@ -23,10 +23,9 @@ export default function ReceiptDetailPage({ params }) {
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    api("/receipts").then((d) => {
-      const r = d.receipts.find((x) => x.id === params.id);
-      if (r) setReceipt(r);
-      else setNotFound(true);
+    api("/receipts/" + params.id).then((r) => {
+      setReceipt(r.receipt);
+      setNotFound(false);
     }).catch(() => setNotFound(true));
   }, [params.id]);
 

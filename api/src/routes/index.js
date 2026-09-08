@@ -41,6 +41,7 @@ router.delete("/bookings/:id", authenticate, bookings.deleteBooking);
 router.get("/geocode/reverse", authenticate, requireCustomer, geocode.reverseGeocode);
 
 router.get("/receipts", authenticate, requireCustomer, receipts.listMyReceipts);
+router.get("/receipts/:id", authenticate, receipts.receiptDetail);
 router.get("/receipts/:id/pdf", authenticate, receipts.downloadReceiptPdf);
 
 router.get("/messages/with/:withId", authenticate, messages.listConversation);

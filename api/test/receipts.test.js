@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import router from "../src/routes/index.js";
+import prisma from "../src/utils/prisma.js";
+import { signToken } from "../src/utils/jwt.js";
 import { authenticate, requireAdmin } from "../src/middleware/auth.js";
-import { adminCreateReceipt } from "../src/controllers/receipts.js";
+import { adminCreateReceipt, receiptDetail, downloadReceiptPdf } from "../src/controllers/receipts.js";
 import { receiptSnapshotData } from "../src/controllers/payments.js";
 
 const response = () => ({ statusCode: null, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
@@ -221,3 +223,138 @@ function findRoute(path, method) {
   }
   return null;
 }
+
+// ---- GET /api/receipts/:id (approved View-Receipt fix) ----
+
+const makeRes = () => {
+  const res = { statusCode: null, body: null, sent: null, headers: {} };
+  res.status = (code) => { res.statusCode = code; return res; };
+  res.json = (body) => { res.statusCode = res.statusCode ?? 200; res.body = body; return res; };
+  res.send = (b) => { res.statusCode = res.statusCode ?? 200; res.sent = b; return res; };
+  res.setHeader = (k, v) => { res.headers[k] = v; return res; };
+  return res;
+};
+
+const makeUser = (id, role) => ({
+  id, role, email: `${id}@example.com`, name: "Ada Lovelace",
+  lastActiveAt: new Date(),
+});
+
+const makeReceipt = (overrides = {}) => ({
+  id: "r1",
+  customerId: "u1",
+  bookingId: "b1",
+  subtotal: 40, tax: 2.9, taxRate: 0.0725, discount: 0, total: 42.9, note: null,
+  baseAmountCents: 4000, discountCents: 0, taxableSubtotalCents: 4000,
+  taxRateBasisPoints: 725, taxCents: 290, finalAmountCents: 4290,
+  createdAt: new Date(), updatedAt: new Date(),
+  customer: { id: "u1", name: "Ada Lovelace", email: "ada@example.com", address: "1 Main St", phone: "555" },
+  booking: { id: "b1", date: new Date(), service: { id: "s1", name: "Deep Clean" } },
+  ...overrides,
+});
+
+async function requestReceiptDetail({ userId = "u1", role = "customer", receipt, paramId } = {}) {
+  const originalReceiptFind = prisma.receipt.findUnique;
+  const originalUserFind = prisma.user.findUnique;
+  prisma.receipt.findUnique = async ({ where }) => (receipt && receipt.id === where.id ? receipt : null);
+  prisma.user.findUnique = async ({ where }) => (where.id === userId ? makeUser(userId, role) : null);
+  const res = makeRes();
+  const req = {
+    cookies: {},
+    headers: { authorization: `Bearer ${signToken(makeUser(userId, role))}` },
+    params: { id: paramId ?? (receipt ? receipt.id : "missing") },
+  };
+  try {
+    await authenticate(req, res, () => {});
+    if (!res.statusCode) await receiptDetail(req, res);
+  } finally {
+    prisma.receipt.findUnique = originalReceiptFind;
+    prisma.user.findUnique = originalUserFind;
+  }
+  return res;
+}
+
+test("receiptDetail is registered as an authenticated customer-or-admin endpoint", () => {
+  const route = findRoute("/receipts/:id", "get");
+  assert.ok(route, "GET /receipts/:id route should be registered");
+  const handles = route.stack.map((layer) => layer.handle);
+  assert.equal(handles[0], authenticate);
+  assert.equal(handles[1], receiptDetail);
+});
+
+test("receiptDetail: authenticated customer viewing their own receipt → 200 with { receipt }", async () => {
+  const res = await requestReceiptDetail({ userId: "u1", role: "customer", receipt: makeReceipt() });
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.body.receipt, "response must be shaped as { receipt }");
+  assert.equal(res.body.receipt.id, "r1");
+  assert.equal(res.body.receipt.customerId, "u1");
+  assert.equal(res.body.receipt.booking.service.name, "Deep Clean");
+  assert.equal(res.body.receipt.finalAmountCents, 4290);
+});
+
+test("receiptDetail: authenticated customer viewing another customer's receipt → 403", async () => {
+  const res = await requestReceiptDetail({ userId: "u1", role: "customer", receipt: makeReceipt({ id: "r2", customerId: "u2" }) });
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.error, /your own receipt/);
+});
+
+test("receiptDetail: authenticated customer requesting a nonexistent receipt → 404", async () => {
+  const res = await requestReceiptDetail({ userId: "u1", role: "customer", receipt: null });
+  assert.equal(res.statusCode, 404);
+  assert.match(res.body.error, /Receipt not found/);
+});
+
+test("receiptDetail: unauthenticated request → 401 before the handler runs", async () => {
+  const res = makeRes();
+  const req = { cookies: {}, headers: {}, params: { id: "r1" } };
+  let handlerReached = false;
+  await authenticate(req, res, () => { handlerReached = true; });
+  assert.equal(res.statusCode, 401);
+  assert.match(res.body.error, /Not authenticated/);
+  assert.equal(handlerReached, false);
+});
+
+test("receiptDetail: admin can view any customer's receipt → 200 (existing admin behavior)", async () => {
+  const res = await requestReceiptDetail({ userId: "a1", role: "admin", receipt: makeReceipt({ customerId: "u2" }) });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.receipt.customerId, "u2");
+});
+
+// ---- Download PDF remains unchanged ----
+
+test("GET /receipts/:id/pdf remains registered with authenticate + downloadReceiptPdf", () => {
+  const route = findRoute("/receipts/:id/pdf", "get");
+  assert.ok(route, "receipt PDF GET route should still be registered");
+  const handles = route.stack.map((layer) => layer.handle);
+  assert.equal(handles[0], authenticate);
+  assert.equal(handles[1], downloadReceiptPdf);
+});
+
+test("downloadReceiptPdf: customer can still download their own receipt PDF", async () => {
+  const originalFind = prisma.receipt.findUnique;
+  prisma.receipt.findUnique = async () => makeReceipt();
+  try {
+    const res = makeRes();
+    await downloadReceiptPdf({ user: makeUser("u1", "customer"), params: { id: "r1" } }, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.headers["Content-Type"], "application/pdf");
+    assert.equal(res.headers["Content-Disposition"], 'inline; filename="trinitas-receipt-R1.pdf"');
+    assert.ok(Buffer.isBuffer(res.sent), "PDF should be sent as a buffer");
+    assert.ok(res.sent.length > 0);
+  } finally {
+    prisma.receipt.findUnique = originalFind;
+  }
+});
+
+test("downloadReceiptPdf: customer cannot download another customer's receipt → 403", async () => {
+  const originalFind = prisma.receipt.findUnique;
+  prisma.receipt.findUnique = async () => makeReceipt({ id: "r2", customerId: "u2" });
+  try {
+    const res = makeRes();
+    await downloadReceiptPdf({ user: makeUser("u1", "customer"), params: { id: "r2" } }, res);
+    assert.equal(res.statusCode, 403);
+    assert.match(res.body.error, /your own/);
+  } finally {
+    prisma.receipt.findUnique = originalFind;
+  }
+});

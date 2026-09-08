@@ -131,6 +131,27 @@ export async function listMyReceipts(req, res) {
 }
 
 /**
+ * Serve one receipt by ID — with authorization.
+ * - Customer → can view ONLY their own receipt.
+ * - Admin  → can view any receipt.
+ * - Unauth → 401 (handled by authenticate middleware).
+ */
+export async function receiptDetail(req, res) {
+  const { id } = req.params;
+
+  const receipt = await prisma.receipt.findUnique({ where: { id }, include: receiptInclude });
+  if (!receipt) return res.status(404).json({ error: "Receipt not found" });
+
+  // Customer may view only their own receipt.
+  if (req.user.role === "customer" && receipt.customerId !== req.user.id) {
+    return res.status(403).json({ error: "You can only view your own receipt" });
+  }
+
+  // Admin may view any receipt.
+  res.json({ receipt });
+}
+
+/**
  * Serve the receipt as a downloadable/printable PDF.
  * Shared by customers (own receipts only) and admins (any receipt).
  */
