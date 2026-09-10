@@ -7,6 +7,11 @@ export const metadata = {
     "Professional window cleaning, screen cleaning, and more in Anoka, Minnesota. Streak-free guarantees, transparent pricing, and easy online booking. Call 1 763-620-4955.",
   applicationName: "Trinitas-Cleaners",
   keywords: ["window cleaning", "screen cleaning", "Anoka MN", "Trinitas-Cleaners", "cleaning service"],
+  verification: {
+    other: {
+      "msvalidate.01": "A65AAD1AF7781ACDA917F2F5D6B914B5"
+    },
+  },
   openGraph: {
     title: "Trinitas-Cleaners | Professional Cleaning in Anoka, MN",
     description: "Window cleaning, screen cleaning, and more — locally owned in Anoka, MN 55303.",
