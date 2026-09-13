@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Eye, Wifi, UserRound, BadgePercent, Wrench,
+  MessageSquare, Megaphone, Eye, Wifi, UserRound, BadgePercent, Wrench, BookOpen,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api, fmtDateTime } from "@/lib/api";
@@ -19,6 +19,7 @@ const links = [
   { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
   { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
+  { href: "/admin/content", label: "How It Works", icon: BookOpen },
 ];
 
 const StatusPill = ({ status }) =>

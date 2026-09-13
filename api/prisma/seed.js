@@ -114,6 +114,62 @@ async function main() {
     },
   });
 
+  const howItWorksSections = [
+    {
+      id: "seed-content-hiw-account",
+      page: "how-it-works",
+      sectionKey: "create-account",
+      title: "Step 1 \u2014 Create an account",
+      body: "Create a free account with your name, email, and password. Your account lets you request services, track bookings, and receive updates.",
+      order: 10,
+      isActive: true,
+    },
+    {
+      id: "seed-content-hiw-request",
+      page: "how-it-works",
+      sectionKey: "request-service",
+      title: "Step 2 \u2014 Request a service",
+      body: "Choose a service and a date, then submit your request. A Trinitas-Cleaners representative reviews every request before confirming it.",
+      order: 20,
+      isActive: true,
+    },
+    {
+      id: "seed-content-hiw-approval",
+      page: "how-it-works",
+      sectionKey: "approval",
+      title: "Step 3 \u2014 Get approved",
+      body: "Accepted requests move forward. If a request cannot be accepted, it is declined and you can reach out through your dashboard for help.",
+      order: 30,
+      isActive: true,
+    },
+    {
+      id: "seed-content-hiw-payment",
+      page: "how-it-works",
+      sectionKey: "payment",
+      title: "Step 4 \u2014 Pay for your service",
+      body: "Online payments are handled by a secure checkout that becomes available once your request is accepted. Cash payments are arranged directly with Trinitas-Cleaners.",
+      order: 40,
+      isActive: true,
+    },
+    {
+      id: "seed-content-hiw-receipt",
+      page: "how-it-works",
+      sectionKey: "receipt",
+      title: "Step 5 \u2014 Get your receipt",
+      body: "A receipt is issued for every completed payment and is available in your dashboard.",
+      order: 50,
+      isActive: true,
+    },
+  ];
+
+  for (const s of howItWorksSections) {
+    await prisma.contentSection.upsert({
+      where: { id: s.id },
+      update: {},
+      create: s,
+    });
+  }
+
   console.log("Seeded admin: admin@trinitascleaners.com / Admin123!");
   console.log("Seeded customer: customer@example.com / Customer123!");
 }

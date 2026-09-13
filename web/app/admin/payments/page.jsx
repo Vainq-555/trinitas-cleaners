@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Banknote, BadgePercent, Wrench, RefreshCw, Wallet,
+  MessageSquare, Megaphone, Banknote, BadgePercent, Wrench, BookOpen, RefreshCw, Wallet,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api, fmtDate, moneyCents } from "@/lib/api";
@@ -24,6 +24,7 @@ const links = [
   { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
   { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
+  { href: "/admin/content", label: "How It Works", icon: BookOpen },
 ];
 
 const CATEGORY_STYLES = {

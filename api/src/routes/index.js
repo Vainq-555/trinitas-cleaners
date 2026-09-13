@@ -7,6 +7,7 @@ import * as bookings from "../controllers/bookings.js";
 import * as receipts from "../controllers/receipts.js";
 import * as messages from "../controllers/messages.js";
 import * as broadcasts from "../controllers/broadcasts.js";
+import * as content from "../controllers/content.js";
 import * as users from "../controllers/users.js";
 import * as payments from "../controllers/payments.js";
 import * as promotions from "../controllers/promotions.js";
@@ -20,6 +21,7 @@ const router = Router();
 router.get("/health", (req, res) => res.json({ ok: true }));
 router.get("/services", optionalAuthenticate, services.listServices);
 router.get("/broadcasts/public", broadcasts.listPublicBroadcasts);
+router.get("/content/:page", content.listPublicContent);
 
 // ---------- Auth ----------
 router.post("/auth/register", auth.register);
@@ -89,5 +91,10 @@ router.get("/admin/messages/with/:withId", adminOnly, messages.listConversation)
 router.get("/admin/broadcasts", adminOnly, broadcasts.adminListBroadcasts);
 router.post("/admin/broadcasts", adminOnly, broadcasts.adminCreateBroadcast);
 router.delete("/admin/broadcasts/:id", adminOnly, broadcasts.adminDeleteBroadcast);
+
+router.get("/admin/content/:page", adminOnly, content.adminListContent);
+router.post("/admin/content/:page", adminOnly, content.adminCreateContent);
+router.put("/admin/content/:page/:id", adminOnly, content.adminUpdateContent);
+router.delete("/admin/content/:page/:id", adminOnly, content.adminDeleteContent);
 
 export default router;

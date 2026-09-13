@@ -27,3 +27,11 @@ export function isValidBroadcastType(v) {
 export function isValidBroadcastTarget(v) {
   return BROADCAST_TARGET.includes(v);
 }
+
+// Slugs of admin-controllable content pages served by this API. Pages are
+// opted in here (never arbitrary), so public content routes stay closed.
+export const CONTENT_PAGES = ["how-it-works"];
+
+export function isValidContentPage(v) {
+  return typeof v === "string" && CONTENT_PAGES.includes(v);
+}

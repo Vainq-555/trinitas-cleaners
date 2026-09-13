@@ -4,7 +4,7 @@ import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, UserRound, ArrowLeft, BadgePercent, Wrench,
+  MessageSquare, Megaphone, UserRound, ArrowLeft, BadgePercent, Wrench, BookOpen,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import StatusBadge from "@/components/StatusBadge";
@@ -20,6 +20,7 @@ const links = [
   { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
   { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
+  { href: "/admin/content", label: "How It Works", icon: BookOpen },
 ];
 
 export default function InspectUserPage({ params }) {

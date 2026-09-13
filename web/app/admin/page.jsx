@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Clock3, Wifi, UserRound, Hammer, ArrowRight, BadgePercent, Wrench,
+  MessageSquare, Megaphone, Clock3, Wifi, UserRound, Hammer, ArrowRight, BadgePercent, Wrench, BookOpen,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import StatCard from "@/components/StatCard";
@@ -21,6 +21,7 @@ const links = [
   { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
   { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
+  { href: "/admin/content", label: "How It Works", icon: BookOpen },
 ];
 
 export default function AdminHome() {

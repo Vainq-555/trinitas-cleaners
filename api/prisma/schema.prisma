@@ -248,6 +248,24 @@ model UserBroadcastRead {
   @@id([userId, broadcastId])
 }
 
+// Admin-controlled sections for static marketing pages (e.g. "how-it-works").
+// The public API exposes only isActive sections for a whitelisted page slug;
+// admins manage the full set via the /admin/content routes.
+model ContentSection {
+  id         String   @id @default(cuid())
+  page       String
+  sectionKey String
+  title      String
+  body       String
+  order      Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([page, sectionKey])
+  @@index([page])
+}
+
 // Password recovery. Only the SHA-256 hash of the raw reset token is stored;
 // the raw token exists solely in the emailed reset URL.
 model PasswordResetToken {
