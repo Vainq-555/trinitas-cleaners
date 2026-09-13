@@ -49,9 +49,10 @@ model Service {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
-  bookings     Booking[]
-  customPrices CustomPrice[]
-  promotions   PromotionService[]
+  bookings         Booking[]
+  customPrices     CustomPrice[]
+  promotions       PromotionService[]
+  contentSections  ContentSection[]
 }
 
 // Per-customer price override. Existence of a row overrides basePrice for
@@ -251,9 +252,14 @@ model UserBroadcastRead {
 // Admin-controlled sections for static marketing pages (e.g. "how-it-works").
 // The public API exposes only isActive sections for a whitelisted page slug;
 // admins manage the full set via the /admin/content routes.
+// serviceId is NULL for global content (multi-service marketing pages such as
+// the top-level /how-it-works page) and non-NULL for a single service's own
+// "How It Works" steps. The global page query binds serviceId = null, service
+// queries bind the specific service, so the two scopes never mix.
 model ContentSection {
   id         String   @id @default(cuid())
   page       String
+  serviceId  String?
   sectionKey String
   title      String
   body       String
@@ -262,7 +268,10 @@ model ContentSection {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  @@unique([page, sectionKey])
+  service Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  @@unique([page, serviceId, sectionKey])
+  @@index([serviceId])
   @@index([page])
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
   MessageSquare, Megaphone, BadgePercent, Wrench, BookOpen, Plus, Save, Pencil, Power, X,
@@ -199,6 +200,9 @@ export default function ServicesPage() {
                   <td className="text-xs text-muted whitespace-nowrap">{fmtDate(service.createdAt)}</td>
                   <td className="text-right whitespace-nowrap">
                     <div className="inline-flex gap-2">
+                      <Link href={`/admin/content?service=${service.id}`} className="btn btn-outline btn-sm">
+                        <BookOpen size={13} /> Steps
+                      </Link>
                       <button className="btn btn-outline btn-sm" onClick={() => openEdit(service)}><Pencil size={13} /> Edit</button>
                       <button className={`btn btn-sm ${service.isActive ? "btn-ghost" : "btn-primary"}`} disabled={busy} onClick={() => toggleActive(service)}>
                         <Power size={13} /> {service.isActive ? "Disable" : "Enable"}

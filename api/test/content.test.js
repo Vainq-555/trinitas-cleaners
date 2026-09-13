@@ -19,6 +19,7 @@ const P2002 = () => { const e = new Error("Unique constraint failed"); e.code = 
 const sectionFixture = (overrides = {}) => ({
   id: "s1",
   page: "how-it-works",
+  serviceId: null,
   sectionKey: "create-account",
   title: "Step 1 — Create an account",
   body: "Create a free account.",
@@ -29,9 +30,21 @@ const sectionFixture = (overrides = {}) => ({
   ...overrides,
 });
 
-// In-memory fake of prisma.contentSection with real P2002/P2025 semantics and
-// an orderKey sort approximating the controller's orderBy.
-const makeDb = (initial = []) => {
+const serviceFixture = (overrides = {}) => ({
+  id: "svc",
+  name: "Window Cleaning",
+  description: "Streak-free windows.",
+  basePrice: 75,
+  isActive: true,
+  ...overrides,
+});
+
+// In-memory fake of prisma.contentSection (+ a service findUnique for scope
+// validation) with real P2002/P2025 semantics and a serviceId-scoped
+// uniqueness model mirroring the (page, serviceId, sectionKey) composite plus
+// the global partial unique index. handler orderBy approximates the
+// controller's sort.
+const makeDb = (initial = [], services = []) => {
   const rows = initial.map((r) => ({ ...r }));
   let seq = rows.length;
   return {
@@ -46,14 +59,19 @@ const makeDb = (initial = []) => {
       },
       findUnique: async ({ where }) => {
         if (where.id) return rows.find((r) => r.id === where.id) ?? null;
-        if (where.page_sectionKey) {
-          const { page, sectionKey } = where.page_sectionKey;
-          return rows.find((r) => r.page === page && r.sectionKey === sectionKey) ?? null;
-        }
         return null;
       },
+      findFirst: async ({ where = {} } = {}) => {
+        return rows.find((r) => {
+          for (const [k, v] of Object.entries(where)) {
+            if (k === "NOT") continue;
+            if (r[k] !== v) return false;
+          }
+          return true;
+        }) ?? null;
+      },
       create: async ({ data }) => {
-        if (rows.some((r) => r.page === data.page && r.sectionKey === data.sectionKey)) throw P2002();
+        if (rows.some((r) => r.page === data.page && r.serviceId === data.serviceId && r.sectionKey === data.sectionKey)) throw P2002();
         const s = { id: `c${++seq}`, createdAt: new Date(), updatedAt: new Date(), ...data };
         rows.push(s);
         return s;
@@ -61,8 +79,8 @@ const makeDb = (initial = []) => {
       update: async ({ where, data }) => {
         const i = rows.findIndex((r) => r.id === where.id);
         if (i < 0) throw P2025();
-        const basePage = rows[i].page;
-        if (rows.some((r) => r.id !== where.id && r.page === basePage && r.sectionKey === data.sectionKey)) throw P2002();
+        const target = rows[i];
+        if (rows.some((r) => r.id !== where.id && r.page === target.page && r.serviceId === target.serviceId && r.sectionKey === data.sectionKey)) throw P2002();
         rows[i] = { ...rows[i], ...data, updatedAt: new Date() };
         return rows[i];
       },
@@ -71,6 +89,9 @@ const makeDb = (initial = []) => {
         if (i < 0) throw P2025();
         return rows.splice(i, 1)[0];
       },
+    },
+    service: {
+      findUnique: async ({ where }) => services.find((s) => s.id === where.id) ?? null,
     },
   };
 };
@@ -253,6 +274,194 @@ test("content responses expose no credential-like fields", async () => {
   for (const forbidden of ["secret", "token", "password", "DATABASE_URL", "STRIPE", "JWT", "credential"]) {
     assert.ok(!payload.toLowerCase().includes(forbidden.toLowerCase()), `response must not contain ${forbidden}`);
   }
+});
+
+// ---- service-specific scope: shared fixtures ----
+
+const svcA = serviceFixture({ id: "svcA", name: "Window Cleaning" });
+const svcB = serviceFixture({ id: "svcB", name: "Screen Cleaning" });
+const globalStep = sectionFixture({ id: "global", sectionKey: "create-account" });
+const aStep = sectionFixture({ id: "a1", serviceId: "svcA", sectionKey: "request" });
+const bStep = sectionFixture({ id: "b1", serviceId: "svcB", sectionKey: "request" });
+
+test("service-scoped create stores the correct serviceId and global create keeps null", async () => {
+  const services = [svcA];
+  let db = makeDb([], services);
+  const sres = response();
+  await adminCreateContent(
+    { params: { page: "how-it-works" }, body: { sectionKey: "payment", title: "Pay", body: "checkout", serviceId: "svcA" } },
+    sres,
+    db,
+  );
+  assert.equal(sres.statusCode, 201);
+  assert.equal(sres.body.section.serviceId, "svcA");
+
+  db = makeDb([], services);
+  const gres = response();
+  await adminCreateContent(
+    { params: { page: "how-it-works" }, body: { sectionKey: "payment", title: "Pay", body: "checkout" } },
+    gres,
+    db,
+  );
+  assert.equal(gres.statusCode, 201);
+  assert.equal(gres.body.section.serviceId, null);
+});
+
+test("invalid or unknown serviceId is rejected with 400", async () => {
+  const db = makeDb([], [svcA]);
+  const missing = response();
+  await adminCreateContent(
+    { params: { page: "how-it-works" }, body: { sectionKey: "x", title: "t", body: "b", serviceId: "not-a-service" } },
+    missing,
+    db,
+  );
+  assert.equal(missing.statusCode, 400);
+  assert.equal(missing.body.error, "Service not found");
+
+  const badType = response();
+  await adminCreateContent(
+    { params: { page: "how-it-works" }, body: { sectionKey: "x", title: "t", body: "b", serviceId: 42 } },
+    badType,
+    db,
+  );
+  assert.equal(badType.statusCode, 400);
+});
+
+test("public global query returns only global (serviceId null) rows", async () => {
+  const db = makeDb([globalStep, aStep, bStep]);
+  const res = response();
+  await listPublicContent({ params: { page: "how-it-works" } }, res, db);
+  assert.deepEqual(res.body.sections.map((s) => s.id), ["global"]);
+});
+
+test("public service query returns only that service's active rows", async () => {
+  const db = makeDb([globalStep, aStep, bStep]);
+  const res = response();
+  await listPublicContent({ params: { page: "how-it-works" }, query: { serviceId: "svcA" } }, res, db);
+  assert.deepEqual(res.body.sections.map((s) => s.id), ["a1"]);
+});
+
+test("Service A cannot see Service B content and vice versa", async () => {
+  const db = makeDb([aStep, bStep]);
+  const a = response();
+  await listPublicContent({ params: { page: "how-it-works" }, query: { serviceId: "svcA" } }, a, db);
+  assert.deepEqual(a.body.sections.map((s) => s.id), ["a1"]);
+  const b = response();
+  await listPublicContent({ params: { page: "how-it-works" }, query: { serviceId: "svcB" } }, b, db);
+  assert.deepEqual(b.body.sections.map((s) => s.id), ["b1"]);
+});
+
+test("service content never appears in the global query", async () => {
+  const db = makeDb([globalStep, aStep, bStep]);
+  const res = response();
+  await listPublicContent({ params: { page: "how-it-works" } }, res, db);
+  assert.equal(res.body.sections.some((s) => s.serviceId !== null), false);
+});
+
+test("inactive service-specific sections are excluded from the public service query", async () => {
+  const inactiveA = sectionFixture({ id: "a2", serviceId: "svcA", sectionKey: "payment", isActive: false });
+  const db = makeDb([aStep, inactiveA]);
+  const res = response();
+  await listPublicContent({ params: { page: "how-it-works" }, query: { serviceId: "svcA" } }, res, db);
+  assert.deepEqual(res.body.sections.map((s) => s.id), ["a1"]);
+});
+
+test("same sectionKey can exist for different services but not twice in one service", async () => {
+  const db = makeDb([], [svcA, svcB]);
+  const a = response();
+  await adminCreateContent(
+    { params: { page: "how-it-works" }, body: { sectionKey: "request", title: "Request", body: "book", serviceId: "svcA" } },
+    a,
+    db,
+  );
+  assert.equal(a.statusCode, 201);
+  const b = response();
+  await adminCreateContent(
+    { params: { page: "how-it-works" }, body: { sectionKey: "request", title: "Request", body: "book", serviceId: "svcB" } },
+    b,
+    db,
+  );
+  assert.equal(b.statusCode, 201);
+
+  const dup = response();
+  await adminCreateContent(
+    { params: { page: "how-it-works" }, body: { sectionKey: "request", title: "Request", body: "book", serviceId: "svcA" } },
+    dup,
+    db,
+  );
+  assert.equal(dup.statusCode, 400);
+  assert.match(dup.body.error, /already exists/);
+});
+
+test("same global sectionKey cannot be duplicated globally", async () => {
+  const db = makeDb([globalStep]);
+  const dup = response();
+  await adminCreateContent(
+    { params: { page: "how-it-works" }, body: { sectionKey: "create-account", title: "t", body: "b" } },
+    dup,
+    db,
+  );
+  assert.equal(dup.statusCode, 400);
+  assert.match(dup.body.error, /already exists/);
+});
+
+test("a global and a service-specific section may share a sectionKey", async () => {
+  const db = makeDb([globalStep], [svcA]);
+  const res = response();
+  await adminCreateContent(
+    { params: { page: "how-it-works" }, body: { sectionKey: "create-account", title: "t", body: "b", serviceId: "svcA" } },
+    res,
+    db,
+  );
+  assert.equal(res.statusCode, 201);
+});
+
+test("admin list is scope-aware: global query returns only global, service query only that service", async () => {
+  const db = makeDb([globalStep, aStep, bStep]);
+  const g = response();
+  await adminListContent({ params: { page: "how-it-works" } }, g, db);
+  assert.deepEqual(g.body.sections.map((s) => s.id), ["global"]);
+  const a = response();
+  await adminListContent({ params: { page: "how-it-works" }, query: { serviceId: "svcA" } }, a, db);
+  assert.deepEqual(a.body.sections.map((s) => s.id), ["a1"]);
+});
+
+test("update duplicate detection is service-scoped and excludes the current row", async () => {
+  const db = makeDb(
+    [
+      sectionFixture({ id: "a1", serviceId: "svcA", sectionKey: "request" }),
+      sectionFixture({ id: "a2", serviceId: "svcA", sectionKey: "payment" }),
+      sectionFixture({ id: "b1", serviceId: "svcB", sectionKey: "book" }),
+    ],
+    [svcA, svcB],
+  );
+
+  // Own-key update is allowed: the current row is excluded from the check.
+  const ownKey = response();
+  await adminUpdateContent({ params: { page: "how-it-works", id: "a1" }, body: { sectionKey: "request", title: "Tweaked" } }, ownKey, db);
+  assert.equal(ownKey.body.section.sectionKey, "request");
+  assert.equal(ownKey.body.section.title, "Tweaked");
+  assert.equal(ownKey.body.section.serviceId, "svcA");
+
+  // Same sectionKey in the SAME service collides.
+  const colliding = response();
+  await adminUpdateContent({ params: { page: "how-it-works", id: "a1" }, body: { sectionKey: "payment" } }, colliding, db);
+  assert.equal(colliding.statusCode, 400);
+  assert.match(colliding.body.error, /already exists/);
+
+  // Same sectionKey in a DIFFERENT service is allowed.
+  const otherService = response();
+  await adminUpdateContent({ params: { page: "how-it-works", id: "b1" }, body: { sectionKey: "payment" } }, otherService, db);
+  assert.equal(otherService.body.section.sectionKey, "payment");
+  assert.equal(otherService.body.section.serviceId, "svcB");
+});
+
+test("serviceId cannot be changed through PUT", async () => {
+  const db = makeDb([sectionFixture({ id: "a1", serviceId: "svcA", sectionKey: "request" })], [svcA, svcB]);
+  const res = response();
+  await adminUpdateContent({ params: { page: "how-it-works", id: "a1" }, body: { serviceId: "svcB" } }, res, db);
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.error, /Scope cannot be changed/);
 });
 
 function findRoute(path, method) {

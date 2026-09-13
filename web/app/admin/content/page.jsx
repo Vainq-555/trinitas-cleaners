@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, BadgePercent, Wrench, BookOpen, Plus, Save, Pencil, Power, Trash2, X,
+  MessageSquare, Megaphone, BadgePercent, Wrench, BookOpen, Globe, Plus, Save, Pencil, Power, Trash2, X,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api } from "@/lib/api";
@@ -33,18 +33,35 @@ export default function ContentPage() {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [scope, setScope] = useState(""); // "" = Global site, otherwise a serviceId
+  const [services, setServices] = useState([]);
 
-  const load = async () => {
+  const load = async (scoped = scope) => {
     try {
-      const data = await api(`/admin/content/${PAGE}`);
+      const suffix = scoped ? `?serviceId=${encodeURIComponent(scoped)}` : "";
+      const data = await api(`/admin/content/${PAGE}${suffix}`);
       setSections(data.sections);
     } catch (error) {
       setErr(error.message);
     }
   };
 
+  const changeScope = (value) => {
+    setScope(value);
+    setMsg("");
+    setErr("");
+    load(value);
+  };
+
   useEffect(() => {
-    load();
+    const params = new URLSearchParams(window.location.search);
+    const svc = params.get("service");
+    if (svc) setScope(svc);
+    api("/admin/services")
+      .then((d) => setServices(Array.isArray(d?.services) ? d.services : []))
+      .catch(() => {});
+    load(svc || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
@@ -77,6 +94,7 @@ export default function ContentPage() {
           body: body.body.trim(),
           order: body.order,
           isActive: body.isActive,
+          ...(scope ? { serviceId: scope } : {}),
         },
       });
       setForm({ ...emptyForm });
@@ -173,8 +191,37 @@ export default function ContentPage() {
       links={links}
       sections={["Admin Portal"]}
       title="How It Works Content"
-      subtitle="Manage the instructional sections shown on the public How It Works page."
+      subtitle={
+        scope
+          ? `Manage this service's How It Works steps. Global content is separate and unchanged.`
+          : "Manage the instructional sections shown on the public How It Works page."
+      }
     >
+      <div className="card card-pad mb-6">
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="flex-1 min-w-[260px]">
+            <label className="label">Applies to</label>
+            <select className="input" value={scope} onChange={(e) => changeScope(e.target.value)}>
+              <option value="">Global site (/how-it-works)</option>
+              {services.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          {scope && (
+            <div className="rounded-lg bg-brand-light px-4 py-2.5 text-sm text-brand-dark flex items-center gap-2">
+              <BookOpen size={15} />
+              Editing steps for <strong>{services.find((s) => s.id === scope)?.name || "this service"}</strong>
+            </div>
+          )}
+        </div>
+        <p className="mt-3 text-xs text-muted">
+          {scope
+            ? "Only this service's steps are listed and created below. Global /how-it-works content is separate and unchanged."
+            : "Sections here appear on the public How It Works page. Choose a service above to manage that service's own steps."}
+        </p>
+      </div>
+
       {msg && <div className="form-ok">{msg}</div>}
       {err && <div className="form-error">{err}</div>}
 
@@ -186,7 +233,9 @@ export default function ContentPage() {
           <div>
             <h2 className="font-bold text-ink">Add a section</h2>
             <p className="text-xs text-muted">
-              New sections are added to the bottom. Change the Order number to reposition.
+              {scope
+                ? "New steps are added to the bottom. Change the Order number to reposition this service's steps."
+                : "New sections are added to the bottom. Change the Order number to reposition."}
             </p>
           </div>
         </div>
@@ -268,7 +317,9 @@ export default function ContentPage() {
                   <td colSpan="5">
                     <div className="empty-state">
                       <BookOpen size={36} className="mx-auto text-slate-300" />
-                      <p className="mt-3 font-semibold text-ink">No sections yet.</p>
+                      <p className="mt-3 font-semibold text-ink">
+                        {scope ? "No steps for this service yet." : "No sections yet."}
+                      </p>
                     </div>
                   </td>
                 </tr>

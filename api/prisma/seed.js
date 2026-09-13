@@ -118,6 +118,7 @@ async function main() {
     {
       id: "seed-content-hiw-account",
       page: "how-it-works",
+      serviceId: null,
       sectionKey: "create-account",
       title: "Step 1 \u2014 Create an account",
       body: "Create a free account with your name, email, and password. Your account lets you request services, track bookings, and receive updates.",
@@ -127,6 +128,7 @@ async function main() {
     {
       id: "seed-content-hiw-request",
       page: "how-it-works",
+      serviceId: null,
       sectionKey: "request-service",
       title: "Step 2 \u2014 Request a service",
       body: "Choose a service and a date, then submit your request. A Trinitas-Cleaners representative reviews every request before confirming it.",
@@ -136,6 +138,7 @@ async function main() {
     {
       id: "seed-content-hiw-approval",
       page: "how-it-works",
+      serviceId: null,
       sectionKey: "approval",
       title: "Step 3 \u2014 Get approved",
       body: "Accepted requests move forward. If a request cannot be accepted, it is declined and you can reach out through your dashboard for help.",
@@ -145,6 +148,7 @@ async function main() {
     {
       id: "seed-content-hiw-payment",
       page: "how-it-works",
+      serviceId: null,
       sectionKey: "payment",
       title: "Step 4 \u2014 Pay for your service",
       body: "Online payments are handled by a secure checkout that becomes available once your request is accepted. Cash payments are arranged directly with Trinitas-Cleaners.",
@@ -154,6 +158,7 @@ async function main() {
     {
       id: "seed-content-hiw-receipt",
       page: "how-it-works",
+      serviceId: null,
       sectionKey: "receipt",
       title: "Step 5 \u2014 Get your receipt",
       body: "A receipt is issued for every completed payment and is available in your dashboard.",

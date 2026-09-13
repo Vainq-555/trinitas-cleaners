@@ -19,22 +19,29 @@ function pageRequirement() {
 
 // ---- Public main site ----
 // Public route: only active sections for a whitelisted page, no auth.
+// With no ?serviceId the query is explicitly global (serviceId = null), so a
+// service-scoped section can never appear on the global page. With
+// ?serviceId=<id> only that service's sections are returned.
 export const listPublicContent = wrap(async function listPublicContent(req, res, next, db = prisma) {
   const { page } = req.params;
   if (!isValidContentPage(page)) return res.status(404).json({ error: "Page not found" });
+  const serviceId = req.query?.serviceId ?? null;
   const sections = await db.contentSection.findMany({
-    where: { page, isActive: true },
+    where: { page, serviceId, isActive: true },
     orderBy: contentOrder,
   });
   res.json({ sections });
 });
 
 // ---- Admin: page content management ----
+// Without ?serviceId lists global (serviceId = null) rows only; with
+// ?serviceId=<id> lists that service's rows only. The two scopes never mix.
 export const adminListContent = wrap(async function adminListContent(req, res, next, db = prisma) {
   const { page } = req.params;
   if (!isValidContentPage(page)) return badRequest(res, pageRequirement());
+  const serviceId = req.query?.serviceId ?? null;
   const sections = await db.contentSection.findMany({
-    where: { page },
+    where: { page, serviceId },
     orderBy: contentOrder,
   });
   res.json({ sections });
@@ -42,7 +49,7 @@ export const adminListContent = wrap(async function adminListContent(req, res, n
 
 export const adminCreateContent = wrap(async function adminCreateContent(req, res, next, db = prisma) {
   const { page } = req.params;
-  const { sectionKey, title, body, order = 0, isActive = true } = req.body || {};
+  const { sectionKey, title, body, order = 0, isActive = true, serviceId = null } = req.body || {};
 
   if (!isValidContentPage(page)) return badRequest(res, pageRequirement());
   if (!sectionKey?.trim()) return badRequest(res, "sectionKey is required");
@@ -51,14 +58,28 @@ export const adminCreateContent = wrap(async function adminCreateContent(req, re
   if (!Number.isInteger(order) || order < 0) return badRequest(res, "order must be a non-negative integer");
   if (typeof isActive !== "boolean") return badRequest(res, "isActive must be a boolean");
 
-  const existing = await db.contentSection.findUnique({
-    where: { page_sectionKey: { page, sectionKey: sectionKey.trim() } },
+  // Optional service scope. When supplied it must reference a real Service;
+  // omitted/null/empty stores the section as global content.
+  let scopeServiceId = null;
+  if (serviceId !== null && serviceId !== undefined && serviceId !== "") {
+    if (typeof serviceId !== "string") return badRequest(res, "serviceId must be a string");
+    const service = await db.service.findUnique({ where: { id: serviceId } });
+    if (!service) return badRequest(res, "Service not found");
+    scopeServiceId = serviceId;
+  }
+
+  // Duplicate sectionKey is scoped: global rows are unique per (page, null,
+  // sectionKey); each service's rows are unique per (page, serviceId,
+  // sectionKey). The same sectionKey may be reused by different services.
+  const existing = await db.contentSection.findFirst({
+    where: { page, serviceId: scopeServiceId, sectionKey: sectionKey.trim() },
   });
   if (existing) return badRequest(res, "A section with this sectionKey already exists for this page");
 
   const section = await db.contentSection.create({
     data: {
       page,
+      serviceId: scopeServiceId,
       sectionKey: sectionKey.trim(),
       title: title.trim(),
       body: body.trim(),
@@ -75,6 +96,13 @@ export const adminUpdateContent = wrap(async function adminUpdateContent(req, re
 
   const existing = await db.contentSection.findUnique({ where: { id } });
   if (!existing || existing.page !== page) return res.status(404).json({ error: "Section not found" });
+
+  // serviceId is immutable through PUT: a section cannot be moved between
+  // global and service scope (or between services). Change scope by
+  // delete/create instead.
+  if (req.body && req.body.serviceId !== undefined) {
+    return badRequest(res, "Scope cannot be changed through this endpoint");
+  }
 
   const { sectionKey, title, body, order, isActive } = req.body || {};
   const data = {};

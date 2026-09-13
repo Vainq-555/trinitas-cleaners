@@ -10,6 +10,7 @@ import Shell from "@/components/Shell";
 import ServiceCard from "@/components/ServiceCard";
 import { api, money } from "@/lib/api";
 import { useMyLocation } from "@/lib/geo";
+import { filterSectionsForService } from "@/lib/serviceContent";
 
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
@@ -34,10 +35,32 @@ export default function ServicesPage() {
   const [locNote, setLocNote] = useState("");
   const [address, setAddress] = useState({ line1: "", city: "", state: "", postalCode: "", country: "US" });
   const [promoCode, setPromoCode] = useState("");
+  const [serviceSteps, setServiceSteps] = useState([]);
 
   useEffect(() => {
     api("/services").then((d) => setServices(d.services)).catch(() => {});
   }, []);
+
+  // Load the selected service's own How It Works steps (active, service-scoped
+  // only). Fetch failures or empty content simply hide the block; they never
+  // block or alter the booking flow.
+  useEffect(() => {
+    if (!selected) {
+      setServiceSteps([]);
+      return;
+    }
+    let cancelled = false;
+    api(`/content/how-it-works?serviceId=${selected.id}`)
+      .then((d) => {
+        if (!cancelled) setServiceSteps(filterSectionsForService(d?.sections, selected.id));
+      })
+      .catch(() => {
+        if (!cancelled) setServiceSteps([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   const useLocation = async () => {
     if (locating) return;
@@ -130,6 +153,25 @@ export default function ServicesPage() {
                 <span className="text-xs text-muted">Flat rate · no hidden fees</span>
               )}
             </div>
+
+            {serviceSteps.length > 0 && (
+              <div className="mt-5 rounded-xl border border-line p-4">
+                <h3 className="font-bold text-ink">How it works</h3>
+                <ol className="mt-3 space-y-3">
+                  {serviceSteps.map((s, i) => (
+                    <li key={s.id || s.sectionKey} className="flex items-start gap-3">
+                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-light text-[11px] font-extrabold text-brand">
+                        {i + 1}
+                      </span>
+                      <div className="text-sm">
+                        <span className="font-semibold text-ink">{s.title}</span>
+                        <p className="text-muted leading-relaxed">{s.body}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
 
              <form onSubmit={book} className="mt-5 space-y-4">
               <div>
