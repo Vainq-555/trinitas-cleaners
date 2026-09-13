@@ -3,13 +3,23 @@ import { badRequest, CONTENT_PAGES, isValidContentPage } from "../utils/validato
 
 const contentOrder = [{ order: "asc" }, { sectionKey: "asc" }];
 
+// Express 4 does not catch rejected promises from async handlers. Route the
+// rejection to the existing errorHandler instead of terminating the process.
+// Handler signature is (req, res, next, db = prisma): Express passes `next` in
+// the third slot; tests inject a fake db in that same third slot. A non-function
+// third argument is therefore treated as the injected db.
+const wrap = (fn) => (req, res, next, db = prisma) => {
+  if (typeof next !== "function") [db, next] = [next, undefined];
+  return Promise.resolve(fn(req, res, next, db)).catch(next);
+};
+
 function pageRequirement() {
   return `page must be one of: ${CONTENT_PAGES.join(", ")}`;
 }
 
 // ---- Public main site ----
 // Public route: only active sections for a whitelisted page, no auth.
-export async function listPublicContent(req, res, db = prisma) {
+export const listPublicContent = wrap(async function listPublicContent(req, res, next, db = prisma) {
   const { page } = req.params;
   if (!isValidContentPage(page)) return res.status(404).json({ error: "Page not found" });
   const sections = await db.contentSection.findMany({
@@ -17,10 +27,10 @@ export async function listPublicContent(req, res, db = prisma) {
     orderBy: contentOrder,
   });
   res.json({ sections });
-}
+});
 
 // ---- Admin: page content management ----
-export async function adminListContent(req, res, db = prisma) {
+export const adminListContent = wrap(async function adminListContent(req, res, next, db = prisma) {
   const { page } = req.params;
   if (!isValidContentPage(page)) return badRequest(res, pageRequirement());
   const sections = await db.contentSection.findMany({
@@ -28,9 +38,9 @@ export async function adminListContent(req, res, db = prisma) {
     orderBy: contentOrder,
   });
   res.json({ sections });
-}
+});
 
-export async function adminCreateContent(req, res, db = prisma) {
+export const adminCreateContent = wrap(async function adminCreateContent(req, res, next, db = prisma) {
   const { page } = req.params;
   const { sectionKey, title, body, order = 0, isActive = true } = req.body || {};
 
@@ -57,9 +67,9 @@ export async function adminCreateContent(req, res, db = prisma) {
     },
   });
   res.status(201).json({ section });
-}
+});
 
-export async function adminUpdateContent(req, res, db = prisma) {
+export const adminUpdateContent = wrap(async function adminUpdateContent(req, res, next, db = prisma) {
   const { page, id } = req.params;
   if (!isValidContentPage(page)) return badRequest(res, pageRequirement());
 
@@ -100,9 +110,9 @@ export async function adminUpdateContent(req, res, db = prisma) {
     throw error;
   }
   res.json({ section });
-}
+});
 
-export async function adminDeleteContent(req, res, db = prisma) {
+export const adminDeleteContent = wrap(async function adminDeleteContent(req, res, next, db = prisma) {
   const { page, id } = req.params;
   if (!isValidContentPage(page)) return badRequest(res, pageRequirement());
 
@@ -111,4 +121,4 @@ export async function adminDeleteContent(req, res, db = prisma) {
 
   await db.contentSection.delete({ where: { id } });
   res.json({ ok: true });
-}
+});
