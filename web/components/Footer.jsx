@@ -6,6 +6,7 @@ import { Sparkles, MapPin, Phone, Mail, CalendarDays, Heart } from "lucide-react
 const quickLinks = [
   { href: "/", label: "Home" },
   { href: "/services", label: "Services & Pricing" },
+  { href: "/service-areas", label: "Service Areas" },
   { href: "/announcements", label: "Announcements" },
   { href: "/contact", label: "Contact" },
   { href: "/login", label: "Customer Login" },

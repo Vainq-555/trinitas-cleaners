@@ -17,6 +17,7 @@ export default function Navbar() {
   const publicLinks = [
     { href: "/", label: "Home" },
     { href: "/services", label: "Services" },
+    { href: "/service-areas", label: "Service Areas" },
     { href: "/announcements", label: "Announcements" },
     { href: "/contact", label: "Contact" },
   ];
