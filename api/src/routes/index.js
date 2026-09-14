@@ -8,6 +8,7 @@ import * as receipts from "../controllers/receipts.js";
 import * as messages from "../controllers/messages.js";
 import * as broadcasts from "../controllers/broadcasts.js";
 import * as content from "../controllers/content.js";
+import * as reviews from "../controllers/reviews.js";
 import * as users from "../controllers/users.js";
 import * as payments from "../controllers/payments.js";
 import * as promotions from "../controllers/promotions.js";
@@ -22,6 +23,7 @@ router.get("/health", (req, res) => res.json({ ok: true }));
 router.get("/services", optionalAuthenticate, services.listServices);
 router.get("/broadcasts/public", broadcasts.listPublicBroadcasts);
 router.get("/content/:page", content.listPublicContent);
+router.get("/reviews", reviews.listPublicReviews);
 
 // ---------- Auth ----------
 router.post("/auth/register", auth.register);
@@ -52,6 +54,9 @@ router.post("/messages/read/:fromId", authenticate, messages.markRead);
 
 router.get("/broadcasts/mine", authenticate, requireCustomer, broadcasts.listMyBroadcasts);
 router.post("/broadcasts/mine/:id/read", authenticate, requireCustomer, broadcasts.markBroadcastRead);
+
+router.get("/reviews/mine", authenticate, requireCustomer, reviews.listMyReviews);
+router.post("/reviews", authenticate, requireCustomer, reviews.createReview);
 
 // ---------- Admin ----------
 const adminOnly = [authenticate, requireAdmin];
@@ -96,5 +101,8 @@ router.get("/admin/content/:page", adminOnly, content.adminListContent);
 router.post("/admin/content/:page", adminOnly, content.adminCreateContent);
 router.put("/admin/content/:page/:id", adminOnly, content.adminUpdateContent);
 router.delete("/admin/content/:page/:id", adminOnly, content.adminDeleteContent);
+
+router.get("/admin/reviews", adminOnly, reviews.adminListReviews);
+router.patch("/admin/reviews/:id/status", adminOnly, reviews.adminSetReviewStatus);
 
 export default router;

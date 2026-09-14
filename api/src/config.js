@@ -16,6 +16,7 @@ export const ROLES = { ADMIN: "admin", CUSTOMER: "customer" };
 export const BOOKING_STATUS = ["pending", "accepted", "declined", "worked"];
 export const BROADCAST_TYPE = ["notification", "announcement"];
 export const BROADCAST_TARGET = ["public", "all", "specific_user"];
+export const REVIEW_STATUS = ["pending", "approved", "rejected"];
 
 // Users idle longer than this (ms) are considered offline.
 export const ONLINE_TTL_MS = 5 * 60 * 1000;

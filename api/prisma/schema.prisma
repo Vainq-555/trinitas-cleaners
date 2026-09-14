@@ -31,6 +31,7 @@ model User {
 
   bookings       Booking[]
   receipts       Receipt[]
+  reviews        Review[]
   messagesSent   Message[]           @relation("Sender")
   messagesRecv   Message[]           @relation("Receiver")
   customPrices   CustomPrice[]
@@ -53,6 +54,7 @@ model Service {
   customPrices     CustomPrice[]
   promotions       PromotionService[]
   contentSections  ContentSection[]
+  reviews          Review[]
 }
 
 // Per-customer price override. Existence of a row overrides basePrice for
@@ -106,6 +108,7 @@ model Booking {
   service  Service   @relation(fields: [serviceId], references: [id])
   receipts Receipt[]
   payment   Payment?
+  review    Review?
   promotion Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
 
   @@index([customerId])
@@ -137,6 +140,32 @@ model Payment {
 
   @@index([status])
   @@index([method])
+}
+
+// Customer ratings on completed bookings. New reviews start as "pending";
+// admins approve or reject them; only approved reviews are ever public.
+// serviceId is a snapshot/reference to the Service of the reviewed Booking so
+// public listings can filter per service without extra joins.
+model Review {
+  id         String   @id @default(cuid())
+  rating     Int      // 1-5, validated in the application layer
+  title      String?
+  body       String
+  // "pending" | "approved" | "rejected"
+  status     String   @default("pending")
+  customerId String
+  bookingId  String   @unique // one review per booking, enforced by the DB
+  serviceId  String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  customer User    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  booking  Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  service  Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([status])
+  @@index([serviceId])
 }
 
 model StripeWebhookEvent {
