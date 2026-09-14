@@ -54,3 +54,58 @@ export const CONTENT_PAGES = ["how-it-works"];
 export function isValidContentPage(v) {
   return typeof v === "string" && CONTENT_PAGES.includes(v);
 }
+
+// ---- Business Information + Service Areas ----
+
+// Canonical singleton id for the BusinessInfo row.
+export const BUSINESS_INFO_ID = "business-info";
+
+function isNonEmptyString(v, max = 1000) {
+  return typeof v === "string" && v.trim().length >= 1 && v.trim().length <= max;
+}
+
+export function isValidBusinessName(v) {
+  return isNonEmptyString(v, 80);
+}
+
+export function isValidPhone(v) {
+  if (typeof v !== "string" || !/^[\d\s()+\-.]{7,20}$/.test(v.trim())) return false;
+  const digits = v.replace(/[^\d]/g, "");
+  return digits.length >= 10 && digits.length <= 15;
+}
+
+export function isValidCity(v) {
+  return isNonEmptyString(v, 80);
+}
+
+export function isValidStateCode(v) {
+  return typeof v === "string" && /^[A-Za-z]{2}$/.test(v.trim());
+}
+
+export function isValidPostalCode(v) {
+  return typeof v === "string" && /^\d{5}(?:-\d{4})?$/.test(v.trim());
+}
+
+export function isValidHours(v) {
+  return isNonEmptyString(v, 200);
+}
+
+export function isValidResponseTime(v) {
+  return isNonEmptyString(v, 200);
+}
+
+export function isValidAddressLine(v) {
+  return v === undefined || v === null || v === "" || (typeof v === "string" && v.trim().length <= 200);
+}
+
+export function isNonNegativeInt(v) {
+  return Number.isInteger(v) && v >= 0;
+}
+
+export function isValidAreaName(v) {
+  return isNonEmptyString(v, 80);
+}
+
+export function isValidAreaDescription(v) {
+  return v === undefined || v === null || v === "" || (typeof v === "string" && v.trim().length <= 500);
+}

@@ -304,6 +304,45 @@ model ContentSection {
   @@index([page])
 }
 
+// Admin-controlled business facts shown on the public site (phone, email,
+// hours, location, response time). Singleton row keyed by the canonical id
+// "business-info". Public API exposes the row as-is; admins edit it via the
+// /admin/business-information endpoint. Never holds secrets.
+model BusinessInfo {
+  id           String    @id // canonical singleton id: "business-info"
+  businessName String
+  phone        String
+  email        String
+  addressLine1 String?
+  city         String
+  state        String
+  postalCode   String
+  hoursWeek    String
+  hoursWeekend String
+  responseTime String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+// Admin-controlled service-area records for the public "Service Areas" page.
+// Public API exposes only active areas, ordered by order then name. Deactivating
+// (isActive = false) is the primary mechanism; DELETE exists for cleanup only.
+model ServiceArea {
+  id          String   @id
+  name        String
+  city        String
+  state       String
+  postalCode  String?
+  description String?
+  order       Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([name])
+  @@index([isActive])
+}
+
 // Password recovery. Only the SHA-256 hash of the raw reset token is stored;
 // the raw token exists solely in the emailed reset URL.
 model PasswordResetToken {

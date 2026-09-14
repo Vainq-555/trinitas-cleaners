@@ -175,6 +175,40 @@ async function main() {
     });
   }
 
+  await prisma.businessInfo.upsert({
+    where: { id: "business-info" },
+    update: {},
+    create: {
+      id: "business-info",
+      businessName: "Trinitas-Cleaners",
+      phone: "1 763-620-4955",
+      email: "trinitascleaner@gmail.com",
+      addressLine1: null,
+      city: "Anoka",
+      state: "MN",
+      postalCode: "55303",
+      hoursWeek: "Monday \u2013 Saturday \u00b7 8:00 AM \u2013 6:00 PM",
+      hoursWeekend: "Sunday \u00b7 Closed",
+      responseTime: "Replies within one business day",
+    },
+  });
+
+  await prisma.serviceArea.upsert({
+    where: { id: "seed-area-anoka" },
+    update: {},
+    create: {
+      id: "seed-area-anoka",
+      name: "Anoka",
+      city: "Anoka",
+      state: "MN",
+      postalCode: "55303",
+      description:
+        "Proudly serving Anoka, MN 55303 and surrounding communities. Coverage can vary by location.",
+      order: 0,
+      isActive: true,
+    },
+  });
+
   console.log("Seeded admin: admin@trinitascleaners.com / Admin123!");
   console.log("Seeded customer: customer@example.com / Customer123!");
 }

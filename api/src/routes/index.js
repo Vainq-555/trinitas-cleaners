@@ -10,6 +10,8 @@ import * as broadcasts from "../controllers/broadcasts.js";
 import * as content from "../controllers/content.js";
 import * as reviews from "../controllers/reviews.js";
 import * as users from "../controllers/users.js";
+import * as businessInfo from "../controllers/businessInfo.js";
+import * as serviceAreas from "../controllers/serviceAreas.js";
 import * as payments from "../controllers/payments.js";
 import * as promotions from "../controllers/promotions.js";
 import * as reconciliation from "../controllers/reconciliation.js";
@@ -24,6 +26,8 @@ router.get("/services", optionalAuthenticate, services.listServices);
 router.get("/broadcasts/public", broadcasts.listPublicBroadcasts);
 router.get("/content/:page", content.listPublicContent);
 router.get("/reviews", reviews.listPublicReviews);
+router.get("/business-information", businessInfo.getBusinessInfo);
+router.get("/service-areas", serviceAreas.listPublicServiceAreas);
 
 // ---------- Auth ----------
 router.post("/auth/register", auth.register);
@@ -104,5 +108,13 @@ router.delete("/admin/content/:page/:id", adminOnly, content.adminDeleteContent)
 
 router.get("/admin/reviews", adminOnly, reviews.adminListReviews);
 router.patch("/admin/reviews/:id/status", adminOnly, reviews.adminSetReviewStatus);
+
+router.get("/admin/business-information", adminOnly, businessInfo.adminGetBusinessInfo);
+router.put("/admin/business-information", adminOnly, businessInfo.adminPutBusinessInfo);
+
+router.get("/admin/service-areas", adminOnly, serviceAreas.adminListServiceAreas);
+router.post("/admin/service-areas", adminOnly, serviceAreas.adminCreateServiceArea);
+router.put("/admin/service-areas/:id", adminOnly, serviceAreas.adminUpdateServiceArea);
+router.delete("/admin/service-areas/:id", adminOnly, serviceAreas.adminDeleteServiceArea);
 
 export default router;
