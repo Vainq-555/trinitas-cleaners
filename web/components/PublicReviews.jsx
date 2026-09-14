@@ -1,21 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Star, MessageSquareQuote } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, MessageSquareQuote } from "lucide-react";
 import { api, fmtDate } from "@/lib/api";
+import ReviewStars from "@/components/ReviewStars";
 
 // Approved-only reviews, newest first, limited client-side for the Home page.
 const MAX_REVIEWS = 3;
-
-function Stars({ value, size = 15 }) {
-  return (
-    <span className="inline-flex items-center gap-0.5" role="img" aria-label={`${value} of 5 stars`}>
-      {[1, 2, 3, 4, 5].map((n) => (
-        <Star key={n} size={size} className={n <= value ? "fill-amber-400 text-amber-400" : "text-slate-300"} />
-      ))}
-    </span>
-  );
-}
 
 // Public, read-only approved-reviews showcase. The backend GET /reviews
 // already returns only admin-approved reviews, so approval is the only gate
@@ -47,7 +39,7 @@ export default function PublicReviews() {
           {shown.map((r) => (
             <div key={r.id} className="card group p-6 flex flex-col transition-all duration-200 hover:-translate-y-1 hover:shadow-lift">
               <div className="flex items-start justify-between gap-2">
-                <Stars value={r.rating} />
+                <ReviewStars rating={r.rating} />
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-light text-brand">
                   <MessageSquareQuote size={18} />
                 </span>
@@ -64,6 +56,14 @@ export default function PublicReviews() {
             </div>
           ))}
         </div>
+
+        {shown.length > 0 && (
+          <div className="mt-10 text-center">
+            <Link href="/reviews" className="btn btn-outline">
+              View All Reviews <ArrowRight size={16} />
+            </Link>
+          </div>
+        )}
       </div>
     </section>
   );
