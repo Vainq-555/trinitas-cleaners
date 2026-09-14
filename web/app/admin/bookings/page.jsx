@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
   MessageSquare, Megaphone, Star, Check, X, Hammer, Inbox, CheckCircle2, ThumbsDown, BadgePercent, Wrench, BookOpen,
-  Banknote, RotateCcw, Receipt,
+  Banknote, RotateCcw, Receipt, Store,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import StatusBadge from "@/components/StatusBadge";
@@ -20,6 +20,7 @@ const links = [
   { href: "/admin/payments", label: "Payments", icon: Banknote },
   { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
   { href: "/admin/services", label: "Services", icon: Wrench },
+  { href: "/admin/business", label: "Business Info", icon: Store },
   { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
   { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, BadgePercent, Wrench, BookOpen, Globe, Plus, Save, Pencil, Power, Trash2, X,
+  MessageSquare, Megaphone, Star, BadgePercent, Wrench, BookOpen, Globe, Plus, Save, Pencil, Power, Trash2, X, Store,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api } from "@/lib/api";
@@ -17,6 +17,7 @@ const links = [
   { href: "/admin/reviews", label: "Reviews", icon: Star },
   { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
   { href: "/admin/services", label: "Services", icon: Wrench },
+  { href: "/admin/business", label: "Business Info", icon: Store },
   { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
   { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },

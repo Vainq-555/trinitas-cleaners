@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, Save, UserRound, BadgePercent, Globe, X, Wrench, BookOpen,
+  MessageSquare, Megaphone, Star, Save, UserRound, BadgePercent, Globe, X, Wrench, BookOpen, Store,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api } from "@/lib/api";
@@ -16,6 +16,7 @@ const links = [
   { href: "/admin/reviews", label: "Reviews", icon: Star },
   { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
   { href: "/admin/services", label: "Services", icon: Wrench },
+  { href: "/admin/business", label: "Business Info", icon: Store },
   { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
   { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
