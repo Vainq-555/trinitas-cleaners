@@ -16,6 +16,7 @@ import {
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ServiceCard from "@/components/ServiceCard";
+import PublicReviews from "@/components/PublicReviews";
 import { api, fmtDate } from "@/lib/api";
 
 const HERO_IMG =
@@ -168,6 +169,8 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      <PublicReviews />
 
       {/* CTA band */}
       <section className="py-16 sm:py-20">
