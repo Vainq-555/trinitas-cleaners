@@ -4,8 +4,39 @@ import Link from "next/link";
 import { Phone, Mail, MapPin, Clock, MessageSquare, CalendarDays } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import { useBusinessInfo } from "@/lib/businessInfo";
+import { telHref, formatAddressLong, splitHoursRow } from "@/lib/businessInfoData";
 
 export default function ContactPage() {
+  const { business } = useBusinessInfo();
+  const week = splitHoursRow(business.hoursWeek);
+  const weekend = splitHoursRow(business.hoursWeekend);
+  const cards = [
+    {
+      icon: Phone,
+      title: "Call us",
+      line1: business.phone,
+      line2: "Tap to call — we answer fast",
+      href: telHref(business.phone),
+      tint: "bg-brand-light text-brand",
+    },
+    {
+      icon: Mail,
+      title: "Email us",
+      line1: business.email,
+      line2: business.responseTime,
+      href: `mailto:${business.email}`,
+      tint: "bg-clean-light text-clean",
+    },
+    {
+      icon: MapPin,
+      title: "Service area",
+      line1: formatAddressLong(business),
+      line2: "And surrounding communities",
+      href: null,
+      tint: "bg-warnbg text-amber-600",
+    },
+  ];
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
@@ -18,32 +49,7 @@ export default function ContactPage() {
         </div>
 
         <div className="mt-10 grid gap-6 lg:grid-cols-3">
-          {[
-            {
-              icon: Phone,
-              title: "Call us",
-              line1: "1 763-620-4955",
-              line2: "Tap to call — we answer fast",
-              href: "tel:17636204955",
-              tint: "bg-brand-light text-brand",
-            },
-            {
-              icon: Mail,
-              title: "Email us",
-              line1: "trinitascleaner@gmail.com",
-              line2: "Replies within one business day",
-              href: "mailto:trinitascleaner@gmail.com",
-              tint: "bg-clean-light text-clean",
-            },
-            {
-              icon: MapPin,
-              title: "Service area",
-              line1: "Anoka, Minnesota 55303",
-              line2: "And surrounding communities",
-              href: null,
-              tint: "bg-warnbg text-amber-600",
-            },
-          ].map((c) => (
+          {cards.map((c) => (
             <div key={c.title} className="card p-6 transition-all duration-200 hover:-translate-y-1 hover:shadow-lift">
               <span className={`grid h-12 w-12 place-items-center rounded-xl ${c.tint}`}>
                 <c.icon size={22} />
@@ -68,12 +74,12 @@ export default function ContactPage() {
             </div>
             <ul className="mt-4 space-y-2.5 text-sm text-slate-700">
               <li className="flex items-center justify-between border-b border-line pb-2">
-                <span className="flex items-center gap-2"><CalendarDays size={14} className="text-clean" /> Monday – Saturday</span>
-                <span className="font-semibold">8:00 AM – 6:00 PM</span>
+                <span className="flex items-center gap-2"><CalendarDays size={14} className="text-clean" /> {week ? week.days : business.hoursWeek}</span>
+                {week != null && <span className="font-semibold">{week.time}</span>}
               </li>
               <li className="flex items-center justify-between">
-                <span>Sunday</span>
-                <span className="font-semibold text-muted">Closed</span>
+                <span>{weekend ? weekend.days : business.hoursWeekend}</span>
+                {weekend != null && <span className="font-semibold text-muted">{weekend.time}</span>}
               </li>
             </ul>
             <p className="mt-4 text-xs text-muted">

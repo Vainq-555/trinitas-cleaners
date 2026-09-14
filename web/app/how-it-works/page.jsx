@@ -2,13 +2,13 @@ import Link from "next/link";
 import {
   Sparkles,
   CalendarCheck,
-  Phone,
   ArrowRight,
   MessageSquare,
   LayoutDashboard,
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import CallUs from "@/components/CallUs";
 import HowItWorksContent from "./HowItWorksContent";
 
 export const metadata = {
@@ -86,9 +86,7 @@ export default function HowItWorksPage() {
               <Link href="/services" className="btn !px-6 !py-3.5 !text-base bg-white/10 text-white border border-white/30 hover:bg-white/20">
                 View Services <ArrowRight size={16} />
               </Link>
-              <a href="tel:17636204955" className="btn !px-6 !py-3.5 !text-base bg-transparent text-white border border-white/40 hover:bg-white/10">
-                <Phone size={18} /> 1 763-620-4955
-              </a>
+              <CallUs className="btn !px-6 !py-3.5 !text-base bg-transparent text-white border border-white/40 hover:bg-white/10" iconSize={18} />
               <Link href="/contact" className="btn !px-6 !py-3.5 !text-base bg-white/10 text-white border border-white/30 hover:bg-white/20">
                 <MessageSquare size={16} /> Contact
               </Link>

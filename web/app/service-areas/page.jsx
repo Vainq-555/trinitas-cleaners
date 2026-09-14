@@ -2,17 +2,15 @@ import Link from "next/link";
 import {
   MapPin,
   Map,
-  Phone,
-  Mail,
-  CalendarDays,
   CalendarCheck,
   ShieldCheck,
   ArrowRight,
-  CheckCircle2,
   MessageSquare,
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import CallUs from "@/components/CallUs";
+import { ServiceAreasTeaser, ServiceAreaCards, BusinessInfoCards } from "./ServiceAreasContent";
 
 export const metadata = {
   title: "Service Areas | Trinitas-Cleaners — Anoka, MN & Surrounding Communities",
@@ -31,35 +29,10 @@ export default function ServiceAreasPage() {
             <MapPin size={13} /> Service Area
           </span>
           <h1 className="mt-4 page-title">Service Areas</h1>
-          <p className="mt-3 text-muted">
-            Proudly serving Anoka, MN 55303 and surrounding communities.
-          </p>
+          <ServiceAreasTeaser />
         </div>
 
-        <section className="mt-12 max-w-3xl">
-          <h2 className="text-2xl font-extrabold tracking-tight text-ink">Anoka, Minnesota 55303</h2>
-          <div className="mt-4 card p-6">
-            <div className="flex items-start gap-4">
-              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-brand-light text-brand">
-                <MapPin size={22} />
-              </span>
-              <div>
-                <h3 className="font-bold text-ink">Locally owned &amp; operated</h3>
-                <p className="mt-2 text-sm text-muted leading-relaxed">
-                  Serving homes and businesses across Anoka, Minnesota 55303, we keep pricing
-                  transparent and back every job with a streak-free guarantee we stand behind.
-                </p>
-                <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2">
-                  {["Locally owned & operated", "Streak-free guarantee", "Free estimates"].map((t) => (
-                    <span key={t} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600">
-                      <CheckCircle2 size={15} className="text-clean" /> {t}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+        <ServiceAreaCards />
 
         <section className="mt-12 max-w-3xl">
           <h2 className="text-2xl font-extrabold tracking-tight text-ink">Surrounding Communities</h2>
@@ -101,9 +74,7 @@ export default function ServiceAreasPage() {
                 <Link href="/contact" className="btn bg-white text-brand hover:bg-brand-light">
                   <MessageSquare size={16} /> Contact Us
                 </Link>
-                <a href="tel:17636204955" className="btn bg-transparent text-white border border-white/40 hover:bg-white/10">
-                  <Phone size={16} /> Call
-                </a>
+                <CallUs className="btn bg-transparent text-white border border-white/40 hover:bg-white/10" iconSize={16} label="Call" />
               </div>
             </div>
           </div>
@@ -111,44 +82,7 @@ export default function ServiceAreasPage() {
 
         <section className="mt-12">
           <h2 className="text-2xl font-extrabold tracking-tight text-ink">Business Information</h2>
-          <div className="mt-4 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="card p-6 transition-all duration-200 hover:-translate-y-1 hover:shadow-lift">
-              <span className="grid h-12 w-12 place-items-center rounded-xl bg-brand-light text-brand">
-                <Phone size={22} />
-              </span>
-              <h3 className="mt-4 font-bold text-ink">Call us</h3>
-              <p className="mt-1 font-semibold text-brand">1 763-620-4955</p>
-              <p className="text-sm text-muted">Tap to call — we answer fast</p>
-              <a href="tel:17636204955" className="btn btn-outline btn-sm mt-4">Get in touch</a>
-            </div>
-
-            <div className="card p-6 transition-all duration-200 hover:-translate-y-1 hover:shadow-lift">
-              <span className="grid h-12 w-12 place-items-center rounded-xl bg-clean-light text-clean">
-                <Mail size={22} />
-              </span>
-              <h3 className="mt-4 font-bold text-ink">Email us</h3>
-              <p className="mt-1 font-semibold text-brand">trinitascleaner@gmail.com</p>
-              <p className="text-sm text-muted">Replies within one business day</p>
-              <a href="mailto:trinitascleaner@gmail.com" className="btn btn-outline btn-sm mt-4">Get in touch</a>
-            </div>
-
-            <div className="card p-6 transition-all duration-200 hover:-translate-y-1 hover:shadow-lift">
-              <span className="grid h-12 w-12 place-items-center rounded-xl bg-warnbg text-amber-600">
-                <CalendarDays size={22} />
-              </span>
-              <h3 className="mt-4 font-bold text-ink">Business hours</h3>
-              <div className="mt-2 space-y-2 text-sm text-slate-700">
-                <p className="flex items-center justify-between border-b border-line pb-2">
-                  <span>Monday – Saturday</span>
-                  <span className="font-semibold">8:00 AM – 6:00 PM</span>
-                </p>
-                <p className="flex items-center justify-between">
-                  <span>Sunday</span>
-                  <span className="font-semibold text-muted">Closed</span>
-                </p>
-              </div>
-            </div>
-          </div>
+          <BusinessInfoCards />
         </section>
 
         <section className="mt-14">
@@ -165,9 +99,7 @@ export default function ServiceAreasPage() {
               <Link href="/signup" className="btn bg-white text-brand hover:bg-brand-light !px-6 !py-3.5 !text-base">
                 <CalendarCheck size={18} /> Book Online
               </Link>
-              <a href="tel:17636204955" className="btn !px-6 !py-3.5 !text-base bg-transparent text-white border border-white/40 hover:bg-white/10">
-                <Phone size={18} /> 1 763-620-4955
-              </a>
+              <CallUs className="btn !px-6 !py-3.5 !text-base bg-transparent text-white border border-white/40 hover:bg-white/10" iconSize={18} />
               <Link href="/contact" className="btn !px-6 !py-3.5 !text-base bg-white/10 text-white border border-white/30 hover:bg-white/20">
                 Contact Us <ArrowRight size={16} />
               </Link>

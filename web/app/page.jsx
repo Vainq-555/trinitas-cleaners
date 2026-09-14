@@ -18,11 +18,14 @@ import Footer from "@/components/Footer";
 import ServiceCard from "@/components/ServiceCard";
 import PublicReviews from "@/components/PublicReviews";
 import { api, fmtDate } from "@/lib/api";
+import { useBusinessInfo } from "@/lib/businessInfo";
+import { telHref, formatAddress } from "@/lib/businessInfoData";
 
 const HERO_IMG =
   "https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=1920&q=80";
 
 export default function HomePage() {
+  const { business } = useBusinessInfo();
   const [services, setServices] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
 
@@ -61,7 +64,7 @@ export default function HomePage() {
           <div className="max-w-2xl animate-fade-up">
             <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-xs font-semibold text-white backdrop-blur border border-white/20">
               <Star size={13} className="fill-amber-400 text-amber-400" />
-              Anoka's trusted window &amp; screen cleaning specialists
+              {business.city}'s trusted window &amp; screen cleaning specialists
             </span>
             <h1 className="mt-6 text-4xl sm:text-5xl lg:text-6xl font-black leading-[1.08] tracking-tight text-white">
               Sparkling windows.
@@ -70,7 +73,7 @@ export default function HomePage() {
             </h1>
             <p className="mt-6 max-w-xl text-lg text-slate-200 leading-relaxed">
               Professional, streak-free window cleaning and screen services for homes
-              and businesses across Anoka, MN 55303. Transparent pricing, online booking,
+              and businesses across {formatAddress(business)}. Transparent pricing, online booking,
               and a clean guarantee we stand behind.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -80,8 +83,8 @@ export default function HomePage() {
               <Link href="/services" className="btn !px-6 !py-3.5 !text-base bg-white/10 text-white border border-white/30 hover:bg-white/20 hover:text-white backdrop-blur">
                 View Services <ArrowRight size={16} />
               </Link>
-              <a href="tel:17636204955" className="inline-flex items-center gap-2 text-sm font-semibold text-white/90 hover:text-white">
-                <Phone size={16} className="text-clean-light" /> 1 763-620-4955
+              <a href={telHref(business.phone)} className="inline-flex items-center gap-2 text-sm font-semibold text-white/90 hover:text-white">
+                <Phone size={16} className="text-clean-light" /> {business.phone}
               </a>
             </div>
 
@@ -133,7 +136,7 @@ export default function HomePage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <div className="text-center max-w-2xl mx-auto">
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-ink">
-              Why choose <span className="text-clean">Trinitas-Cleaners?</span>
+              Why choose <span className="text-clean">{business.businessName}?</span>
             </h2>
             <p className="mt-3 text-muted">A family-run business that treats your home like our own.</p>
           </div>
@@ -148,7 +151,7 @@ export default function HomePage() {
               {
                 icon: BadgeCheck,
                 title: "Locally owned",
-                desc: "Proudly serving Anoka, MN 55303 and nearby communities. Support a neighbor, not a franchise.",
+                desc: `Proudly serving ${formatAddress(business)} and nearby communities. Support a neighbor, not a franchise.`,
                 tint: "bg-clean-light text-clean",
               },
               {
@@ -189,8 +192,8 @@ export default function HomePage() {
               <Link href="/signup" className="btn bg-white text-brand hover:bg-brand-light !px-6 !py-3.5 !text-base">
                 <CalendarCheck size={18} /> Create Account &amp; Book
               </Link>
-              <a href="tel:17636204955" className="btn !px-6 !py-3.5 !text-base bg-transparent text-white border border-white/40 hover:bg-white/10">
-                <Phone size={18} /> 1 763-620-4955
+              <a href={telHref(business.phone)} className="btn !px-6 !py-3.5 !text-base bg-transparent text-white border border-white/40 hover:bg-white/10">
+                <Phone size={18} /> {business.phone}
               </a>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
+import { BusinessInfoProvider } from "@/lib/businessInfo";
 
 export const metadata = {
   title: "Trinitas-Cleaners | Professional Cleaning in Anoka, MN",
@@ -32,7 +33,9 @@ export default function RootLayout({ children }) {
         />
       </head>
       <body className="min-h-screen bg-canvas">
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <BusinessInfoProvider>{children}</BusinessInfoProvider>
+        </AuthProvider>
       </body>
     </html>
   );

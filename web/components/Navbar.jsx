@@ -5,10 +5,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X, Phone, Sparkles, LogIn, UserPlus, LayoutDashboard } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useBusinessInfo } from "@/lib/businessInfo";
+import { telHref } from "@/lib/businessInfoData";
 
 export default function Navbar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const { business } = useBusinessInfo();
   const [open, setOpen] = useState(false);
 
   const isDashboard = pathname.startsWith("/dashboard");
@@ -63,8 +66,8 @@ export default function Navbar() {
                 <Link key={l.href} href={l.href} className={link(l)}>{l.label}</Link>
               ))}
               <span className="mx-2 h-5 w-px bg-line" />
-              <a href="tel:17636204955" className="hidden lg:flex items-center gap-1.5 text-sm font-medium text-clean hover:text-clean-dark">
-                <Phone size={15} /> 1 763-620-4955
+              <a href={telHref(business.phone)} className="hidden lg:flex items-center gap-1.5 text-sm font-medium text-clean hover:text-clean-dark">
+                <Phone size={15} /> {business.phone}
               </a>
               {user ? (
                 <Link
@@ -137,8 +140,8 @@ export default function Navbar() {
                       </Link>
                     </>
                   )}
-                  <a href="tel:17636204955" className="btn btn-secondary">
-                    <Phone size={16} /> 1 763-620-4955
+                  <a href={telHref(business.phone)} className="btn btn-secondary">
+                    <Phone size={16} /> {business.phone}
                   </a>
                 </div>
               </>

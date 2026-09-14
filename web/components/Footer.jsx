@@ -2,6 +2,13 @@
 
 import Link from "next/link";
 import { Sparkles, MapPin, Phone, Mail, CalendarDays, Heart } from "lucide-react";
+import { useBusinessInfo } from "@/lib/businessInfo";
+import {
+  telHref,
+  compactHours,
+  formatAddress,
+  formatAddressLong,
+} from "@/lib/businessInfoData";
 
 const quickLinks = [
   { href: "/", label: "Home" },
@@ -23,6 +30,7 @@ const serviceLinks = [
 ];
 
 export default function Footer() {
+  const { business } = useBusinessInfo();
   return (
     <footer className="footer bg-brand-deeper text-white mt-auto">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 py-12">
@@ -33,7 +41,7 @@ export default function Footer() {
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-white">
                 <Sparkles size={18} />
               </span>
-              <span className="text-lg font-extrabold tracking-tight">Trinitas-Cleaners</span>
+              <span className="text-lg font-extrabold tracking-tight">{business.businessName}</span>
             </div>
             <p className="mt-4 text-sm text-brand-soft leading-relaxed">
               Locally owned window &amp; screen cleaning service. Sparkling results,
@@ -75,27 +83,27 @@ export default function Footer() {
             <ul className="space-y-3">
               <li className="flex items-start gap-3 text-sm text-slate-300">
                 <MapPin size={16} className="mt-0.5 text-clean shrink-0" />
-                Anoka, Minnesota 55303
+                {formatAddressLong(business)}
               </li>
               <li>
-                <a href="tel:17636204955" className="flex items-center gap-3 text-sm text-slate-300 hover:text-white transition-colors">
-                  <Phone size={16} className="text-clean shrink-0" /> 1 763-620-4955
+                <a href={telHref(business.phone)} className="flex items-center gap-3 text-sm text-slate-300 hover:text-white transition-colors">
+                  <Phone size={16} className="text-clean shrink-0" /> {business.phone}
                 </a>
               </li>
               <li>
-                <a href="mailto:trinitascleaner@gmail.com" className="flex items-center gap-3 text-sm text-slate-300 hover:text-white transition-colors">
-                  <Mail size={16} className="text-clean shrink-0" /> trinitascleaner@gmail.com
+                <a href={`mailto:${business.email}`} className="flex items-center gap-3 text-sm text-slate-300 hover:text-white transition-colors">
+                  <Mail size={16} className="text-clean shrink-0" /> {business.email}
                 </a>
               </li>
               <li className="flex items-center gap-3 text-sm text-slate-300">
-                <CalendarDays size={16} className="text-clean shrink-0" /> Mon–Sat · 8 AM – 6 PM
+                <CalendarDays size={16} className="text-clean shrink-0" /> {compactHours(business.hoursWeek)}
               </li>
             </ul>
           </div>
         </div>
 
         <div className="mt-10 pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
-          <p>© {new Date().getFullYear()} Trinitas-Cleaners · Anoka, MN 55303</p>
+          <p>© {new Date().getFullYear()} {business.businessName} · {formatAddress(business)}</p>
           <p className="flex items-center gap-1.5">
             Made with <Heart size={12} className="text-danger fill-danger" /> for sparkling windows
           </p>

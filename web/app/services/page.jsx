@@ -7,8 +7,11 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ServiceCard from "@/components/ServiceCard";
 import { api } from "@/lib/api";
+import { useBusinessInfo } from "@/lib/businessInfo";
+import { telHref } from "@/lib/businessInfoData";
 
 export default function ServicesPage() {
+  const { business } = useBusinessInfo();
   const [services, setServices] = useState([]);
 
   useEffect(() => {
@@ -57,8 +60,8 @@ export default function ServicesPage() {
             </div>
           </div>
           <div className="flex gap-2">
-            <a href="tel:17636204955" className="btn btn-outline">
-              <Phone size={16} /> 1 763-620-4955
+            <a href={telHref(business.phone)} className="btn btn-outline">
+              <Phone size={16} /> {business.phone}
             </a>
             <Link href="/contact" className="btn btn-primary">Contact us</Link>
           </div>
