@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings,
-  CalendarDays, Wallet, Clock3, Megaphone, ArrowRight,
+  Star, CalendarDays, Wallet, Clock3, Megaphone, ArrowRight,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import StatusBadge from "@/components/StatusBadge";
@@ -13,6 +13,7 @@ import { api, fmtDate, money } from "@/lib/api";
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/dashboard/bookings", label: "My Bookings", icon: CalendarCheck },
+  { href: "/dashboard/reviews", label: "My Reviews", icon: Star },
   { href: "/dashboard/services", label: "Book a Service", icon: Sparkles },
   { href: "/dashboard/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/dashboard/messages", label: "Message Admin", icon: MessageSquare },

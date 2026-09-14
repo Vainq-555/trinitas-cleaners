@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings,
-  Save, Trash2, ShieldAlert, UserRound, Mail, Phone, MapPin, LogOut,
+  Star, Save, Trash2, ShieldAlert, UserRound, Mail, Phone, MapPin, LogOut,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api } from "@/lib/api";
@@ -12,6 +12,7 @@ import { useAuth } from "@/lib/auth";
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/dashboard/bookings", label: "My Bookings", icon: CalendarCheck },
+  { href: "/dashboard/reviews", label: "My Reviews", icon: Star },
   { href: "/dashboard/services", label: "Book a Service", icon: Sparkles },
   { href: "/dashboard/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/dashboard/messages", label: "Message Admin", icon: MessageSquare },

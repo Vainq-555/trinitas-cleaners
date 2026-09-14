@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings,
-  ArrowLeft, CalendarPlus, BadgePercent,
+  Star, ArrowLeft, CalendarPlus, BadgePercent,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import ServiceCard from "@/components/ServiceCard";
@@ -15,6 +15,7 @@ import { filterSectionsForService } from "@/lib/serviceContent";
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/dashboard/bookings", label: "My Bookings", icon: CalendarCheck },
+  { href: "/dashboard/reviews", label: "My Reviews", icon: Star },
   { href: "/dashboard/services", label: "Book a Service", icon: Sparkles },
   { href: "/dashboard/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/dashboard/messages", label: "Message Admin", icon: MessageSquare },

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings,
-  Trash2, CalendarPlus,
+  Star, Trash2, CalendarPlus,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import StatusBadge from "@/components/StatusBadge";
@@ -14,6 +14,7 @@ import { useMyLocation } from "@/lib/geo";
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/dashboard/bookings", label: "My Bookings", icon: CalendarCheck },
+  { href: "/dashboard/reviews", label: "My Reviews", icon: Star },
   { href: "/dashboard/services", label: "Book a Service", icon: Sparkles },
   { href: "/dashboard/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/dashboard/messages", label: "Message Admin", icon: MessageSquare },
@@ -24,6 +25,7 @@ const filters = ["all", "pending", "accepted", "worked", "declined"];
 
 export default function BookingsPage() {
   const [bookings, setBookings] = useState([]);
+  const [reviewedBookingIds, setReviewedBookingIds] = useState(new Set());
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState(null);
@@ -36,7 +38,12 @@ export default function BookingsPage() {
   const [serviceAddress, setServiceAddress] = useState({ line1: "", city: "", state: "", postalCode: "", country: "US" });
 
   const load = () =>
-    api("/bookings").then((d) => setBookings(d.bookings)).finally(() => setLoading(false));
+    Promise.all([api("/bookings"), api("/reviews/mine")])
+      .then(([d, r]) => {
+        setBookings(d.bookings);
+        setReviewedBookingIds(new Set(r.reviews.map((x) => x.bookingId)));
+      })
+      .finally(() => setLoading(false));
 
   useEffect(() => {
     load();
@@ -233,6 +240,11 @@ export default function BookingsPage() {
                       )}
                       {b.payment?.method === "online" && b.status === "declined" && (
                         <span className="mr-2 inline-flex items-center text-xs font-semibold text-danger">Not approved</span>
+                      )}
+                      {b.status === "worked" && !b.archivedAt && !reviewedBookingIds.has(b.id) && (
+                        <Link href="/dashboard/reviews" className="btn btn-outline btn-sm mr-2">
+                          <Star size={14} /> Review
+                        </Link>
                       )}
                       {b.status === "worked" && !b.archivedAt && (
                         <button className="btn btn-danger btn-sm" onClick={() => remove(b.id)}>
