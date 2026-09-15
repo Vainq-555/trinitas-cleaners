@@ -31,7 +31,11 @@ const areaFixture = (overrides = {}) => ({
 const makeDb = (areas = []) => {
   const rows = areas.map((a) => ({ ...a }));
   let seq = rows.length;
+  let lastCreateHadId = false;
   return {
+    get lastCreateHadId() {
+      return lastCreateHadId;
+    },
     serviceArea: {
       findMany: async ({ where = {}, orderBy } = {}) => {
         const out = rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
@@ -52,6 +56,7 @@ const makeDb = (areas = []) => {
         if (rows.some((r) => r.name === data.name)) throw P2002();
         const a = { id: `sa${++seq}`, createdAt: new Date("2026-09-16T00:00:00Z"), updatedAt: new Date("2026-09-16T00:00:00Z"), ...data };
         rows.push(a);
+        lastCreateHadId = data.id !== undefined;
         return { ...a };
       },
       update: async ({ where, data }) => {
@@ -122,6 +127,9 @@ test("admin can create an area (201, normalized) and rejects duplicates and inva
   assert.equal(res.body.area.state, "MN");
   assert.equal(res.body.area.isActive, true);
   assert.equal(res.body.area.order, 0);
+  assert.equal(validAreaBody().id, undefined);
+  assert.equal(db.lastCreateHadId, false);
+  assert.ok(res.body.area.id && typeof res.body.area.id === "string");
 
   const dup = response();
   await adminCreateServiceArea({ body: { name: "Anoka", city: "Anoka", state: "MN" } }, dup, db);

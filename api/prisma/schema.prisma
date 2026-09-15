@@ -328,7 +328,7 @@ model BusinessInfo {
 // Public API exposes only active areas, ordered by order then name. Deactivating
 // (isActive = false) is the primary mechanism; DELETE exists for cleanup only.
 model ServiceArea {
-  id          String   @id
+  id          String   @id @default(cuid())
   name        String
   city        String
   state       String
