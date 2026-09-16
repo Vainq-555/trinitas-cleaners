@@ -3,12 +3,22 @@
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, BadgePercent, Wrench, BookOpen, Globe, Plus, Save, Pencil, Power, Trash2, X, Store,
+  MessageSquare, Megaphone, Star, BadgePercent, Wrench, BookOpen, Globe, Plus, Save, Pencil, Power, Trash2, X, Store, CircleHelp,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api } from "@/lib/api";
 
-const PAGE = "how-it-works";
+const DEFAULT_PAGE = "how-it-works";
+
+const CONTENT_TYPES = [
+  { id: "how-it-works", label: "How It Works", icon: BookOpen },
+  { id: "faq", label: "FAQ", icon: CircleHelp },
+];
+
+const pageConfig = (page) =>
+  page === "faq"
+    ? { typeName: "FAQ", titleField: "Question", bodyField: "Answer", noun: "question" }
+    : { typeName: "How It Works", titleField: "Title", bodyField: "Body", noun: "section" };
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -23,6 +33,7 @@ const links = [
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
   { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
   { href: "/admin/content", label: "How It Works", icon: BookOpen },
+  { href: "/admin/content?page=faq", label: "FAQ", icon: CircleHelp },
 ];
 
 const emptyForm = { sectionKey: "", title: "", body: "", order: 0, isActive: true };
@@ -35,17 +46,28 @@ export default function ContentPage() {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(DEFAULT_PAGE);
   const [scope, setScope] = useState(""); // "" = Global site, otherwise a serviceId
   const [services, setServices] = useState([]);
 
-  const load = async (scoped = scope) => {
+  const cfg = pageConfig(page);
+
+  const load = async (scoped = scope, pageArg = page) => {
     try {
       const suffix = scoped ? `?serviceId=${encodeURIComponent(scoped)}` : "";
-      const data = await api(`/admin/content/${PAGE}${suffix}`);
+      const data = await api(`/admin/content/${pageArg}${suffix}`);
       setSections(data.sections);
     } catch (error) {
       setErr(error.message);
     }
+  };
+
+  const changePage = (value) => {
+    setPage(value);
+    setScope("");
+    setMsg("");
+    setErr("");
+    load("", value);
   };
 
   const changeScope = (value) => {
@@ -58,11 +80,13 @@ export default function ContentPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const svc = params.get("service");
-    if (svc) setScope(svc);
+    const pageParam = params.get("page") === "faq" ? "faq" : DEFAULT_PAGE;
+    if (svc && pageParam === DEFAULT_PAGE) setScope(svc);
+    setPage(pageParam);
     api("/admin/services")
       .then((d) => setServices(Array.isArray(d?.services) ? d.services : []))
       .catch(() => {});
-    load(svc || "");
+    load(svc && pageParam === DEFAULT_PAGE ? svc : "", pageParam);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -88,7 +112,7 @@ export default function ContentPage() {
     setErr("");
     setMsg("");
     try {
-      await api(`/admin/content/${PAGE}`, {
+      await api(`/admin/content/${page}`, {
         method: "POST",
         body: {
           sectionKey: body.sectionKey.trim(),
@@ -134,7 +158,7 @@ export default function ContentPage() {
     setErr("");
     setMsg("");
     try {
-      await api(`/admin/content/${PAGE}/${editing.id}`, {
+      await api(`/admin/content/${page}/${editing.id}`, {
         method: "PUT",
         body: {
           sectionKey: fields.sectionKey.trim(),
@@ -159,7 +183,7 @@ export default function ContentPage() {
     setErr("");
     setMsg("");
     try {
-      await api(`/admin/content/${PAGE}/${section.id}`, {
+      await api(`/admin/content/${page}/${section.id}`, {
         method: "PUT",
         body: { isActive: !section.isActive },
       });
@@ -178,7 +202,7 @@ export default function ContentPage() {
     setErr("");
     setMsg("");
     try {
-      await api(`/admin/content/${PAGE}/${section.id}`, { method: "DELETE" });
+      await api(`/admin/content/${page}/${section.id}`, { method: "DELETE" });
       setMsg("Section deleted.");
       await load();
     } catch (error) {
@@ -192,25 +216,37 @@ export default function ContentPage() {
     <Shell
       links={links}
       sections={["Admin Portal"]}
-      title="How It Works Content"
+      title={`${cfg.typeName} Content`}
       subtitle={
-        scope
-          ? `Manage this service's How It Works steps. Global content is separate and unchanged.`
-          : "Manage the instructional sections shown on the public How It Works page."
+        page === "faq"
+          ? "Manage the questions and answers shown on the public FAQ page."
+          : scope
+            ? `Manage this service's How It Works steps. Global content is separate and unchanged.`
+            : "Manage the instructional sections shown on the public How It Works page."
       }
     >
       <div className="card card-pad mb-6">
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex-1 min-w-[260px]">
-            <label className="label">Applies to</label>
-            <select className="input" value={scope} onChange={(e) => changeScope(e.target.value)}>
-              <option value="">Global site (/how-it-works)</option>
-              {services.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+            <label className="label">Content</label>
+            <select className="input" value={page} onChange={(e) => changePage(e.target.value)}>
+              {CONTENT_TYPES.map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
               ))}
             </select>
           </div>
-          {scope && (
+          {page === DEFAULT_PAGE && (
+            <div className="flex-1 min-w-[260px]">
+              <label className="label">Applies to</label>
+              <select className="input" value={scope} onChange={(e) => changeScope(e.target.value)}>
+                <option value="">Global site (/how-it-works)</option>
+                {services.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {scope && page === DEFAULT_PAGE && (
             <div className="rounded-lg bg-brand-light px-4 py-2.5 text-sm text-brand-dark flex items-center gap-2">
               <BookOpen size={15} />
               Editing steps for <strong>{services.find((s) => s.id === scope)?.name || "this service"}</strong>
@@ -218,9 +254,11 @@ export default function ContentPage() {
           )}
         </div>
         <p className="mt-3 text-xs text-muted">
-          {scope
-            ? "Only this service's steps are listed and created below. Global /how-it-works content is separate and unchanged."
-            : "Sections here appear on the public How It Works page. Choose a service above to manage that service's own steps."}
+          {page === "faq"
+            ? "Questions and answers here appear on the public FAQ page. FAQ is site-wide content (global only)."
+            : scope
+              ? "Only this service's steps are listed and created below. Global /how-it-works content is separate and unchanged."
+              : "Sections here appear on the public How It Works page. Choose a service above to manage that service's own steps."}
         </p>
       </div>
 
@@ -230,29 +268,31 @@ export default function ContentPage() {
       <div className="card card-pad mb-6">
         <div className="flex items-center gap-2.5">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-light text-brand">
-            <BookOpen size={18} />
+            {page === "faq" ? <CircleHelp size={18} /> : <BookOpen size={18} />}
           </span>
           <div>
-            <h2 className="font-bold text-ink">Add a section</h2>
+            <h2 className="font-bold text-ink">{page === "faq" ? "Add a question" : "Add a section"}</h2>
             <p className="text-xs text-muted">
-              {scope
-                ? "New steps are added to the bottom. Change the Order number to reposition this service's steps."
-                : "New sections are added to the bottom. Change the Order number to reposition."}
+              {page === "faq"
+                ? "New questions are added to the bottom. Change the Order number to reposition."
+                : scope
+                  ? "New steps are added to the bottom. Change the Order number to reposition this service's steps."
+                  : "New sections are added to the bottom. Change the Order number to reposition."}
             </p>
           </div>
         </div>
         <form onSubmit={create} className="mt-5">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="label">Section key *</label>
+              <label className="label">Key *</label>
               <input
                 className="input"
                 required
                 value={form.sectionKey}
                 onChange={set("sectionKey")}
-                placeholder="e.g. create-account"
+                placeholder="e.g. request-service"
               />
-              <p className="mt-1 text-[11px] text-muted">Unique identifier, e.g. <code className="bg-slate-100 px-1 rounded">request-service</code>. Cannot be changed after creation.</p>
+              <p className="mt-1 text-[11px] text-muted">Stable unique key. Editable after creation, but must stay unique for this page.</p>
             </div>
             <div>
               <label className="label">Order *</label>
@@ -267,23 +307,23 @@ export default function ContentPage() {
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="label">Title *</label>
+              <label className="label">{cfg.titleField} *</label>
               <input
                 className="input"
                 required
                 value={form.title}
                 onChange={set("title")}
-                placeholder="e.g. Step 1 — Create an account"
+                placeholder={page === "faq" ? "The question customers may ask" : "e.g. Step 1 — Create an account"}
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="label">Body *</label>
+              <label className="label">{cfg.bodyField} *</label>
               <textarea
                 className="textarea"
                 required
                 value={form.body}
                 onChange={set("body")}
-                placeholder="Describe what this step covers."
+                placeholder={page === "faq" ? "Provide a clear answer." : "Describe what this step covers."}
               />
             </div>
             <label className="inline-flex items-center gap-2 text-sm font-semibold text-ink">
@@ -318,9 +358,13 @@ export default function ContentPage() {
                 <tr>
                   <td colSpan="5">
                     <div className="empty-state">
-                      <BookOpen size={36} className="mx-auto text-slate-300" />
+                      <CircleHelp size={36} className="mx-auto text-slate-300" />
                       <p className="mt-3 font-semibold text-ink">
-                        {scope ? "No steps for this service yet." : "No sections yet."}
+                        {page === "faq"
+                          ? "No FAQ questions yet."
+                          : scope
+                            ? "No steps for this service yet."
+                            : "No sections yet."}
                       </p>
                     </div>
                   </td>
@@ -383,7 +427,7 @@ export default function ContentPage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <h2 className="font-bold text-ink">Edit section</h2>
+              <h2 className="font-bold text-ink">{page === "faq" ? "Edit question" : "Edit section"}</h2>
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={() => setEditing(null)}
@@ -395,7 +439,7 @@ export default function ContentPage() {
             {err && <div className="form-error mt-3">{err}</div>}
             <form onSubmit={saveEdit} className="mt-4 space-y-4">
               <div>
-                <label className="label">Section key *</label>
+                <label className="label">Key *</label>
                 <input
                   className="input"
                   required
@@ -404,7 +448,7 @@ export default function ContentPage() {
                 />
               </div>
               <div>
-                <label className="label">Title *</label>
+                <label className="label">{cfg.titleField} *</label>
                 <input
                   className="input"
                   required
@@ -413,7 +457,7 @@ export default function ContentPage() {
                 />
               </div>
               <div>
-                <label className="label">Body *</label>
+                <label className="label">{cfg.bodyField} *</label>
                 <textarea
                   className="textarea"
                   required

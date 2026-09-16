@@ -96,8 +96,19 @@ const makeDb = (initial = [], services = []) => {
   };
 };
 
-test("content page whitelist is limited to how-it-works for this checkpoint", () => {
-  assert.deepEqual(CONTENT_PAGES, ["how-it-works"]);
+test("content page whitelist covers how-it-works and faq", () => {
+  assert.deepEqual(CONTENT_PAGES, ["how-it-works", "faq"]);
+});
+
+test("public faq page is served by the generic content endpoint with active-only ordering", async () => {
+  const inactive = sectionFixture({ id: "q1", page: "faq", sectionKey: "second", order: 30, isActive: false, title: "Q inactive" });
+  const first = sectionFixture({ id: "q2", page: "faq", sectionKey: "first", order: 10, title: "Q one", body: "A one" });
+  const res = response();
+  await listPublicContent({ params: { page: "faq" } }, res, makeDb([inactive, first]));
+  assert.equal(res.body.error, undefined);
+  assert.deepEqual(res.body.sections.map((s) => s.sectionKey), ["first"]);
+  assert.equal(res.body.sections[0].title, "Q one");
+  assert.equal(res.body.sections[0].isActive, true);
 });
 
 test("public endpoint returns only active sections ordered by order then sectionKey", async () => {
