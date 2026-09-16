@@ -29,7 +29,9 @@ export default function Navbar() {
 
   const link = (l) =>
     `text-sm font-medium px-3 py-2 rounded-lg transition-colors ${
-      pathname === l.href ? "text-brand bg-brand-light" : "text-slate-600 hover:text-brand hover:bg-slate-100"
+      pathname === l.href
+        ? "text-brand bg-brand-light dark:text-brand-soft"
+        : "text-slate-600 hover:text-brand hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-brand"
     }`;
 
   const handleLogout = async () => {
@@ -38,7 +40,7 @@ export default function Navbar() {
   };
 
   return (
-    <header className="nav sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-line">
+    <header className="nav sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-line dark:bg-slate-800/95 dark:border-slate-700">
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <div className="flex h-16 items-center justify-between gap-4">
           {/* Brand */}
@@ -67,7 +69,7 @@ export default function Navbar() {
                 <Link key={l.href} href={l.href} className={link(l)}>{l.label}</Link>
               ))}
               <span className="mx-2 h-5 w-px bg-line" />
-              <a href={telHref(business.phone)} className="hidden lg:flex items-center gap-1.5 text-sm font-medium text-clean hover:text-clean-dark">
+              <a href={telHref(business.phone)} className="hidden lg:flex items-center gap-1.5 text-sm font-medium text-clean hover:text-clean-dark dark:hover:text-clean-light">
                 <Phone size={15} /> {business.phone}
               </a>
               {user ? (
@@ -93,7 +95,7 @@ export default function Navbar() {
 
           {/* Mobile hamburger */}
           <button
-            className="md:hidden grid h-10 w-10 place-items-center rounded-lg text-ink hover:bg-slate-100"
+            className="md:hidden grid h-10 w-10 place-items-center rounded-lg text-ink hover:bg-slate-100 dark:hover:bg-slate-700/60"
             onClick={() => setOpen(!open)}
             aria-label="Toggle menu"
           >
@@ -104,7 +106,7 @@ export default function Navbar() {
 
       {/* Mobile menu */}
       {open && (
-        <div className="md:hidden border-t border-line bg-white animate-fade-up">
+        <div className="md:hidden border-t border-line bg-white animate-fade-up dark:bg-slate-800 dark:border-slate-700">
           <div className="px-4 py-4 space-y-1">
             {isDashboard || isAdmin ? (
               <>
@@ -112,7 +114,7 @@ export default function Navbar() {
                   {isAdmin ? "Admin Portal" : "Customer Portal"} ·{" "}
                   <span className="font-semibold text-ink">{user?.name}</span>
                 </p>
-                <Link href="/" className="block px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100" onClick={() => setOpen(false)}>
+                <Link href="/" className="block px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700/60" onClick={() => setOpen(false)}>
                   View public site
                 </Link>
                 <button onClick={handleLogout} className="w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium text-danger hover:bg-dangerbg">
