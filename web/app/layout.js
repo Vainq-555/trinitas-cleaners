@@ -1,9 +1,6 @@
 import "./globals.css";
-import Script from "next/script";
 import { AuthProvider } from "@/lib/auth";
 import { BusinessInfoProvider } from "@/lib/businessInfo";
-import { AppearanceProvider } from "@/lib/appearance";
-import { APPEARANCE_BOOT } from "@/lib/appearanceMode.mjs";
 
 export const metadata = {
   title: "Trinitas-Cleaners | Professional Cleaning in Anoka, MN",
@@ -34,17 +31,10 @@ export default function RootLayout({ children }) {
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
           rel="stylesheet"
         />
-        <Script
-          id="appearance-boot"
-          strategy="beforeInteractive"
-          dangerouslySetInnerHTML={{ __html: APPEARANCE_BOOT }}
-        />
       </head>
       <body className="min-h-screen bg-canvas">
         <AuthProvider>
-          <BusinessInfoProvider>
-            <AppearanceProvider>{children}</AppearanceProvider>
-          </BusinessInfoProvider>
+          <BusinessInfoProvider>{children}</BusinessInfoProvider>
         </AuthProvider>
       </body>
     </html>

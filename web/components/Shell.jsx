@@ -40,7 +40,7 @@ export default function Shell({ links, sections, title, subtitle, children }) {
           className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
             isActive(l.href)
               ? "bg-brand text-white"
-              : "text-slate-600 hover:bg-slate-100 hover:text-brand dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-brand"
+              : "text-slate-600 hover:bg-slate-100 hover:text-brand"
           } ${collapsed ? "justify-center" : ""}`}
         >
           {l.icon && <l.icon size={18} className="shrink-0" />}
@@ -54,7 +54,7 @@ export default function Shell({ links, sections, title, subtitle, children }) {
     <div className="min-h-screen bg-canvas">
       {/* Desktop sidebar */}
       <aside
-        className={`sidebar fixed inset-y-0 left-0 z-40 hidden lg:flex flex-col bg-white border-r border-line transition-all duration-200 dark:bg-slate-800 dark:border-slate-700 ${
+        className={`sidebar fixed inset-y-0 left-0 z-40 hidden lg:flex flex-col bg-white border-r border-line transition-all duration-200 ${
           collapsed ? "w-[76px]" : "w-[248px]"
         }`}
       >
@@ -85,10 +85,10 @@ export default function Shell({ links, sections, title, subtitle, children }) {
 
       {/* Mobile overlay + drawer */}
       {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-40 bg-ink/50 backdrop-blur-sm dark:bg-black/60" onClick={() => setMobileOpen(false)} />
+        <div className="lg:hidden fixed inset-0 z-40 bg-ink/50 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
       )}
       <aside
-        className={`sidebar lg:hidden fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col bg-white shadow-lift transition-transform duration-200 dark:bg-slate-800 ${
+        className={`sidebar lg:hidden fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col bg-white shadow-lift transition-transform duration-200 ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -101,7 +101,7 @@ export default function Shell({ links, sections, title, subtitle, children }) {
               Trinitas<span className="text-brand">-</span>Cleaners
             </span>
           </div>
-          <button className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-slate-100 dark:hover:bg-slate-700/60" onClick={() => setMobileOpen(false)} aria-label="Close menu">
+          <button className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-slate-100" onClick={() => setMobileOpen(false)} aria-label="Close menu">
             <X size={20} />
           </button>
         </div>
@@ -111,9 +111,9 @@ export default function Shell({ links, sections, title, subtitle, children }) {
       {/* Main content */}
       <div className={`transition-all duration-200 ${collapsed ? "lg:pl-[76px]" : "lg:pl-[248px]"}`}>
         {/* Top bar */}
-        <div className="no-print sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-white/95 px-4 sm:px-6 backdrop-blur dark:bg-slate-800/95 dark:border-slate-700">
+        <div className="no-print sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-white/95 px-4 sm:px-6 backdrop-blur">
           <button
-            className="lg:hidden grid h-9 w-9 place-items-center rounded-lg text-ink hover:bg-slate-100 dark:hover:bg-slate-700/60"
+            className="lg:hidden grid h-9 w-9 place-items-center rounded-lg text-ink hover:bg-slate-100"
             onClick={() => setMobileOpen(true)}
             aria-label="Open menu"
           >

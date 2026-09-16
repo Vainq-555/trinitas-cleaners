@@ -2,39 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ---------- Appearance tokens ---------- */
-:root {
-  --color-brand: 15 76 129;
-  --color-brand-dark: 10 58 100;
-  --color-brand-deeper: 8 46 80;
-  --color-brand-light: 234 242 250;
-  --color-brand-soft: 214 230 245;
-  --color-clean: 46 139 87;
-  --color-clean-dark: 31 107 64;
-  --color-clean-light: 232 245 238;
-  --color-canvas: 248 250 252;
-  --color-ink: 30 41 59;
-  --color-muted: 100 116 139;
-  --color-line: 226 232 240;
-  --color-warn: 245 158 11;
-  --color-warnbg: 254 243 199;
-  --color-danger: 220 38 38;
-  --color-dangerbg: 254 226 226;
-  --color-okbg: 220 252 231;
-}
-
-.dark {
-  --color-brand-light: 22 50 90;
-  --color-clean-light: 15 59 36;
-  --color-canvas: 15 23 42;
-  --color-ink: 241 245 249;
-  --color-muted: 148 163 184;
-  --color-line: 51 65 85;
-  --color-warnbg: 120 53 15;
-  --color-dangerbg: 127 29 29;
-  --color-okbg: 20 83 45;
-}
-
 @layer base {
   body {
     @apply bg-canvas text-ink antialiased;
@@ -60,10 +27,10 @@
     @apply bg-clean text-white hover:bg-clean-dark shadow-card;
   }
   .btn-outline {
-    @apply bg-white text-ink border border-line hover:border-brand hover:text-brand dark:bg-slate-800 dark:border-slate-700 dark:hover:border-brand dark:hover:text-brand;
+    @apply bg-white text-ink border border-line hover:border-brand hover:text-brand;
   }
   .btn-ghost {
-    @apply bg-transparent text-muted hover:bg-slate-100 hover:text-ink dark:hover:bg-slate-700/60 dark:hover:text-ink;
+    @apply bg-transparent text-muted hover:bg-slate-100 hover:text-ink;
   }
   .btn-danger {
     @apply bg-danger text-white hover:bg-red-700;
@@ -77,7 +44,7 @@
     @apply block text-xs font-semibold text-ink mb-1.5;
   }
   .input {
-    @apply w-full px-3.5 py-2.5 rounded-lg border border-line bg-white text-ink text-sm focus:outline-none focus:ring-2 focus:ring-brand-soft focus:border-brand transition dark:bg-slate-800 dark:border-slate-700 dark:focus:ring-brand-dark dark:focus:border-brand;
+    @apply w-full px-3.5 py-2.5 rounded-lg border border-line bg-white text-ink text-sm focus:outline-none focus:ring-2 focus:ring-brand-soft focus:border-brand transition;
   }
   .textarea {
     @apply input min-h-[110px] resize-y;
@@ -85,7 +52,7 @@
 
   /* ---------- Cards ---------- */
   .card {
-    @apply bg-white border border-line rounded-xl shadow-card dark:bg-slate-800 dark:border-slate-700;
+    @apply bg-white border border-line rounded-xl shadow-card;
   }
   .card-pad {
     @apply card p-5;
@@ -96,7 +63,7 @@
     @apply w-full text-sm;
   }
   .table th {
-    @apply text-left px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-muted bg-slate-50 border-b border-line dark:bg-slate-900;
+    @apply text-left px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-muted bg-slate-50 border-b border-line;
   }
   .table td {
     @apply px-4 py-3 border-b border-line align-middle;
@@ -105,7 +72,7 @@
     @apply transition-colors;
   }
   .table tbody tr:hover {
-    @apply bg-slate-50/70 dark:bg-slate-700/40;
+    @apply bg-slate-50/70;
   }
   .table tbody tr:last-child td {
     @apply border-b-0;
@@ -116,7 +83,7 @@
     @apply bg-dangerbg text-danger rounded-lg px-4 py-3 text-sm mb-4;
   }
   .form-ok {
-    @apply bg-okbg text-clean-dark rounded-lg px-4 py-3 text-sm mb-4 dark:text-green-300;
+    @apply bg-okbg text-clean-dark rounded-lg px-4 py-3 text-sm mb-4;
   }
 
   /* ---------- Page header ---------- */
@@ -129,7 +96,7 @@
 
   /* ---------- Tabs ---------- */
   .tab-btn {
-    @apply px-4 py-2 rounded-full border border-line bg-white text-sm font-semibold text-muted hover:border-brand hover:text-brand transition cursor-pointer dark:bg-slate-800 dark:border-slate-700 dark:hover:border-brand dark:hover:text-brand;
+    @apply px-4 py-2 rounded-full border border-line bg-white text-sm font-semibold text-muted hover:border-brand hover:text-brand transition cursor-pointer;
   }
   .tab-btn-active {
     @apply border-brand bg-brand text-white;
@@ -137,7 +104,7 @@
 
   /* ---------- Announcement ---------- */
   .announcement-card {
-    @apply bg-white border-l-4 border-brand rounded-lg shadow-card p-5 dark:bg-slate-800;
+    @apply bg-white border-l-4 border-brand rounded-lg shadow-card p-5;
   }
 
   /* ---------- Empty state ---------- */

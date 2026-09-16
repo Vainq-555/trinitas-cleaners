@@ -4,12 +4,10 @@ import { useEffect, useState } from "react";
 import {
   Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings,
   Star, Save, Trash2, ShieldAlert, UserRound, Mail, Phone, MapPin, LogOut,
-  Sun, Moon, Monitor,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useAppearance } from "@/lib/appearance";
 
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
@@ -23,17 +21,10 @@ const links = [
 
 export default function SettingsPage() {
   const { user, refresh, logout } = useAuth();
-  const { mode: appearance, setAppearance } = useAppearance();
   const [form, setForm] = useState({ name: "", phone: "", address: "" });
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-
-  const appearanceOptions = [
-    { value: "light", label: "Light", icon: Sun },
-    { value: "dark", label: "Dark", icon: Moon },
-    { value: "system", label: "System", icon: Monitor },
-  ];
 
   useEffect(() => {
     if (user) setForm({ name: user.name, phone: user.phone || "", address: user.address || "" });
@@ -99,7 +90,7 @@ export default function SettingsPage() {
             </div>
             <div>
               <label className="label"><Mail size={12} className="inline -mt-0.5 mr-1" />Email (login)</label>
-              <input className="input bg-slate-50 text-muted dark:bg-slate-900 dark:text-slate-400" value={user?.email || ""} disabled />
+              <input className="input bg-slate-50 text-muted" value={user?.email || ""} disabled />
               <p className="mt-1.5 text-xs text-muted">Email can't be changed; contact the admin if needed.</p>
             </div>
             <div className="flex gap-2 pt-1">
@@ -111,32 +102,6 @@ export default function SettingsPage() {
               </button>
             </div>
           </form>
-        </div>
-
-        {/* Appearance */}
-        <div className="card card-pad">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-light text-brand"><Monitor size={18} /></span>
-            <h2 className="font-bold text-ink">Appearance</h2>
-          </div>
-          <p className="mt-4 text-sm text-muted leading-relaxed">Choose how Trinitas looks on this device.</p>
-          <div className="mt-4 grid sm:grid-cols-3 gap-2">
-            {appearanceOptions.map(({ value, label, icon: Icon }) => {
-              const active = appearance === value;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setAppearance(value)}
-                  className={active ? "tab-btn tab-btn-active" : "tab-btn"}
-                >
-                  <Icon size={15} className="inline -mt-0.5 mr-1.5" />
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-3 text-xs text-muted">System follows your device. Admin stays light.</p>
         </div>
 
         {/* Danger zone */}

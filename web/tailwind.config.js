@@ -1,6 +1,5 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  darkMode: "class",
   content: [
     "./app/**/*.{js,jsx,ts,tsx}",
     "./components/**/*.{js,jsx,ts,tsx}",
@@ -10,26 +9,26 @@ module.exports = {
     extend: {
       colors: {
         brand: {
-          DEFAULT: "rgb(var(--color-brand) / <alpha-value>)",
-          dark: "rgb(var(--color-brand-dark) / <alpha-value>)",
-          deeper: "rgb(var(--color-brand-deeper) / <alpha-value>)",
-          light: "rgb(var(--color-brand-light) / <alpha-value>)",
-          soft: "rgb(var(--color-brand-soft) / <alpha-value>)",
+          DEFAULT: "#0F4C81",
+          dark: "#0A3A64",
+          deeper: "#082E50",
+          light: "#EAF2FA",
+          soft: "#D6E6F5",
         },
         clean: {
-          DEFAULT: "rgb(var(--color-clean) / <alpha-value>)",
-          dark: "rgb(var(--color-clean-dark) / <alpha-value>)",
-          light: "rgb(var(--color-clean-light) / <alpha-value>)",
+          DEFAULT: "#2E8B57",
+          dark: "#1F6B40",
+          light: "#E8F5EE",
         },
-        canvas: "rgb(var(--color-canvas) / <alpha-value>)",
-        ink: "rgb(var(--color-ink) / <alpha-value>)",
-        muted: "rgb(var(--color-muted) / <alpha-value>)",
-        line: "rgb(var(--color-line) / <alpha-value>)",
-        warn: "rgb(var(--color-warn) / <alpha-value>)",
-        warnbg: "rgb(var(--color-warnbg) / <alpha-value>)",
-        danger: "rgb(var(--color-danger) / <alpha-value>)",
-        dangerbg: "rgb(var(--color-dangerbg) / <alpha-value>)",
-        okbg: "rgb(var(--color-okbg) / <alpha-value>)",
+        canvas: "#F8FAFC",
+        ink: "#1E293B",
+        muted: "#64748B",
+        line: "#E2E8F0",
+        warn: "#F59E0B",
+        warnbg: "#FEF3C7",
+        danger: "#DC2626",
+        dangerbg: "#FEE2E2",
+        okbg: "#DCFCE7",
       },
       fontFamily: {
         sans: ["Inter", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "Helvetica", "Arial", "sans-serif"],
