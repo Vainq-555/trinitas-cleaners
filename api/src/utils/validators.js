@@ -109,3 +109,17 @@ export function isValidAreaName(v) {
 export function isValidAreaDescription(v) {
   return v === undefined || v === null || v === "" || (typeof v === "string" && v.trim().length <= 500);
 }
+
+// ---- Community chat ----
+
+export const COMMUNITY_MESSAGE_MAX_LENGTH = 1000;
+export const COMMUNITY_LIMIT_DEFAULT = 50;
+export const COMMUNITY_LIMIT_MAX = 100;
+
+export function isValidCommunityMessage(v) {
+  return typeof v === "string" && v.trim().length >= 1 && v.trim().length <= COMMUNITY_MESSAGE_MAX_LENGTH;
+}
+
+export function isValidCommunityLimit(v) {
+  return Number.isInteger(v) && v >= 1 && v <= COMMUNITY_LIMIT_MAX;
+}

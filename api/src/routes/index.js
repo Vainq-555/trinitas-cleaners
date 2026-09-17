@@ -8,6 +8,7 @@ import * as receipts from "../controllers/receipts.js";
 import * as messages from "../controllers/messages.js";
 import * as broadcasts from "../controllers/broadcasts.js";
 import * as content from "../controllers/content.js";
+import * as community from "../controllers/community.js";
 import * as reviews from "../controllers/reviews.js";
 import * as users from "../controllers/users.js";
 import * as businessInfo from "../controllers/businessInfo.js";
@@ -62,6 +63,9 @@ router.post("/broadcasts/mine/:id/read", authenticate, requireCustomer, broadcas
 router.get("/reviews/mine", authenticate, requireCustomer, reviews.listMyReviews);
 router.post("/reviews", authenticate, requireCustomer, reviews.createReview);
 
+router.get("/community/messages", authenticate, requireCustomer, community.listCommunityMessages);
+router.post("/community/messages", authenticate, requireCustomer, community.createCommunityMessage);
+
 // ---------- Admin ----------
 const adminOnly = [authenticate, requireAdmin];
 
@@ -108,6 +112,11 @@ router.delete("/admin/content/:page/:id", adminOnly, content.adminDeleteContent)
 
 router.get("/admin/reviews", adminOnly, reviews.adminListReviews);
 router.patch("/admin/reviews/:id/status", adminOnly, reviews.adminSetReviewStatus);
+
+router.get("/admin/community/messages", adminOnly, community.adminListCommunityMessages);
+router.get("/admin/community/users", adminOnly, community.adminListCommunityUsers);
+router.post("/admin/community/users/:id/block", adminOnly, community.adminBlockUser);
+router.post("/admin/community/users/:id/unblock", adminOnly, community.adminUnblockUser);
 
 router.get("/admin/business-information", adminOnly, businessInfo.adminGetBusinessInfo);
 router.put("/admin/business-information", adminOnly, businessInfo.adminPutBusinessInfo);

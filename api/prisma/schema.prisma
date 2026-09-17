@@ -28,10 +28,14 @@ model User {
   status       String    @default("offline") // "online" | "offline"
   lastActiveAt DateTime?
   createdAt    DateTime  @default(now())
+  // Set when the customer is blocked from posting in the community chat;
+  // NULL means the customer may post. Admins clear it to unblock.
+  communityBlockedAt DateTime?
 
-  bookings       Booking[]
-  receipts       Receipt[]
-  reviews        Review[]
+  bookings         Booking[]
+  receipts         Receipt[]
+  reviews          Review[]
+  communityMessages CommunityMessage[]
   messagesSent   Message[]           @relation("Sender")
   messagesRecv   Message[]           @relation("Receiver")
   customPrices   CustomPrice[]
@@ -247,6 +251,23 @@ model Message {
 
   @@index([senderId])
   @@index([receiverId])
+}
+
+// Customer-to-customer global community chat. Customers post messages visible
+// to all other customers; admins moderate (block/unblock via
+// User.communityBlockedAt) but never author posts. Blocked customers can still
+// read history but their posts are rejected. Deleting a customer account
+// removes their posts (same cascade convention as other User children).
+model CommunityMessage {
+  id         String   @id @default(cuid())
+  customerId String
+  content    String
+  createdAt  DateTime @default(now())
+
+  customer User @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([customerId])
 }
 
 // "notification" | "announcement"

@@ -15,6 +15,7 @@ const links = [
   { href: "/dashboard/services", label: "Book a Service", icon: Sparkles },
   { href: "/dashboard/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/dashboard/messages", label: "Message Admin", icon: MessageSquare },
+  { href: "/dashboard/community", label: "Community", icon: MessageCircle },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 

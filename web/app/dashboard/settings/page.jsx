@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings,
   Star, Save, Trash2, ShieldAlert, UserRound, Mail, Phone, MapPin, LogOut,
+  MessageCircle,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api } from "@/lib/api";
@@ -16,6 +17,7 @@ const links = [
   { href: "/dashboard/services", label: "Book a Service", icon: Sparkles },
   { href: "/dashboard/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/dashboard/messages", label: "Message Admin", icon: MessageSquare },
+  { href: "/dashboard/community", label: "Community", icon: MessageCircle },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 

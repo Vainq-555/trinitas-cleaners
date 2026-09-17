@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
   MessageSquare, Megaphone, Star, Clock3, Wifi, UserRound, Hammer, ArrowRight, BadgePercent, Wrench, BookOpen, Store,
+MessageCircle,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import StatCard from "@/components/StatCard";
@@ -22,6 +23,7 @@ const links = [
   { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
   { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
+  { href: "/admin/community", label: "Community", icon: MessageCircle },
   { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
   { href: "/admin/content", label: "How It Works", icon: BookOpen },
 ];
