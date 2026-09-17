@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings,
+  Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings, Star,
   Users, Send, RefreshCw,
 } from "lucide-react";
 import Shell from "@/components/Shell";
