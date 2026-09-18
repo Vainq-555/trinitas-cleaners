@@ -144,6 +144,14 @@ router.get("/admin/community/profiles/:userId", adminOnly, profiles.adminGetProf
 router.post("/admin/community/profiles/:userId/hide", adminOnly, profiles.adminHideProfile);
 router.post("/admin/community/profiles/:userId/unhide", adminOnly, profiles.adminUnhideProfile);
 
+router.get("/admin/community/groups", adminOnly, groups.adminListGroups);
+router.get("/admin/community/groups/:groupId", adminOnly, groups.adminGetGroup);
+router.get("/admin/community/groups/:groupId/members", adminOnly, groups.adminListGroupMembers);
+router.get("/admin/community/groups/:groupId/messages", adminOnly, groups.adminListGroupMessages);
+router.delete("/admin/community/groups/:groupId/members/:userId", adminOnly, groups.adminRemoveGroupMember);
+router.delete("/admin/community/groups/:groupId/messages/:messageId", adminOnly, groups.adminDeleteGroupMessage);
+router.post("/admin/community/groups/:groupId/dissolve", adminOnly, groups.adminDissolveGroup);
+
 router.get("/admin/business-information", adminOnly, businessInfo.adminGetBusinessInfo);
 router.put("/admin/business-information", adminOnly, businessInfo.adminPutBusinessInfo);
 

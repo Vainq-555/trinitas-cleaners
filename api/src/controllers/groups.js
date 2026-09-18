@@ -29,6 +29,8 @@ const OWNER_LEAVE_ERROR =
   "Owners cannot leave a group. Transfer ownership or dissolve the group first.";
 const REMOVE_SELF_ERROR =
   "Owners cannot remove themselves. Transfer ownership or dissolve the group first.";
+const ADMIN_REMOVE_OWNER_ERROR =
+  "Group owners cannot be removed. Dissolve the group instead.";
 
 // Create budget: 3 groups per customer per 60 minutes. Membership budget: 30
 // join/leave operations per customer per 10 minutes. Group messages have two
@@ -40,6 +42,11 @@ export const groupCreateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000, 
 export const groupMembershipLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, limit: 30 });
 export const groupMessagePerGroupLimiter = createRateLimiter({ windowMs: 60 * 1000, limit: 10 });
 export const groupMessagePerCustomerLimiter = createRateLimiter({ windowMs: 60 * 1000, limit: 30 });
+
+// Admin write budget: 60 moderation actions per admin per 10 minutes, shared
+// across remove-member / delete-message / dissolve. Keyed by admin id (each
+// admin gets their own budget). Exported so tests can reset it (_reset).
+export const adminGroupActionLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, limit: 60 });
 
 // Opaque cursor: base64url(JSON {t: epochMillis, i: id}). Malformed/unknown
 // shapes decode to null so the caller can reject with HTTP 400. Same shape and
@@ -131,6 +138,31 @@ const messageShape = (gm) => ({
   createdAt: gm.createdAt,
   deleted: Boolean(gm.deletedAt),
   sender: senderShape(gm.sender),
+});
+
+// Admin group shape: the public group identity plus the moderation state an
+// admin needs (dissolvedAt/status) and the owner's public identity. Never a raw
+// Group row and never owner/member account fields.
+const adminGroupShape = (g, memberCount) => ({
+  id: g.id,
+  name: g.name,
+  description: g.description ?? null,
+  type: g.type,
+  createdAt: g.createdAt,
+  updatedAt: g.updatedAt,
+  dissolvedAt: g.dissolvedAt ?? null,
+  status: g.dissolvedAt ? "dissolved" : "active",
+  memberCount,
+  owner: ownerShape(g.owner),
+});
+
+// Admin message shape: the customer-safe message shape plus moderation
+// attribution (who soft-deleted it, when). deletedById/deletedAt are only ever
+// returned on admin endpoints; the customer message shape never includes them.
+const adminMessageShape = (gm) => ({
+  ...messageShape(gm),
+  deletedById: gm.deletedById ?? null,
+  deletedAt: gm.deletedAt ?? null,
 });
 
 // Fields the PATCH /update endpoint refuses to touch. id/createdAt/updatedAt
@@ -769,5 +801,267 @@ export const dissolveGroup = wrap(async function dissolveGroup(req, res, next, d
     data: { dissolvedAt: new Date() },
   });
 
+  res.json({ ok: true, groupId, dissolved: true });
+});
+
+// ---- Admin side ----
+
+// GET /api/admin/community/groups — admin discovery of public groups, active
+// and dissolved. Unlike the customer feed, dissolved groups stay visible with
+// status "dissolved" so admins can still moderate them. Same cursor window as
+// the customer discovery feed.
+export const adminListGroups = wrap(async function adminListGroups(req, res, next, db = prisma) {
+  if (!req.user || req.user.role !== ROLES.ADMIN) {
+    return res.status(403).json({ error: "Only admins can manage community groups" });
+  }
+
+  const limit = parseGroupLimit(req);
+  if (limit === null) {
+    return badRequest(res, `limit must be an integer from 1 to ${GROUP_LIMIT_MAX}`);
+  }
+
+  const before = req.query?.before;
+  const where = { type: GROUP_TYPE_PUBLIC };
+  if (before !== undefined && before !== null && before !== "") {
+    const cursor = decodeCursor(before);
+    if (!cursor) return badRequest(res, "before must be a valid cursor");
+    const d = new Date(cursor.t);
+    where.OR = [{ createdAt: { lt: d } }, { createdAt: d, id: { lt: cursor.i } }];
+  }
+
+  const rows = await db.group.findMany({
+    where,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    include: { owner: { select: { id: true, name: true } } },
+  });
+
+  const hasMore = rows.length > limit;
+  const groups = rows.slice(0, limit);
+
+  let memberCounts = new Map();
+  if (groups.length) {
+    const ids = groups.map((g) => g.id);
+    const allMemberships = await db.groupMember.findMany({ where: { groupId: { in: ids } } });
+    for (const m of allMemberships) memberCounts.set(m.groupId, (memberCounts.get(m.groupId) ?? 0) + 1);
+  }
+
+  const items = groups.map((g) => adminGroupShape(g, memberCounts.get(g.id) ?? 0));
+  const last = items[items.length - 1];
+  const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
+
+  res.json({ items, hasMore, nextCursor });
+});
+
+// GET /api/admin/community/groups/:groupId — admin detail of any public group,
+// including dissolved ones (customers see a 404 for dissolved groups).
+export const adminGetGroup = wrap(async function adminGetGroup(req, res, next, db = prisma) {
+  if (!req.user || req.user.role !== ROLES.ADMIN) {
+    return res.status(403).json({ error: "Only admins can manage community groups" });
+  }
+
+  const groupId = groupParam(req, res);
+  if (!groupId) return;
+
+  const group = await db.group.findFirst({
+    where: { id: groupId, type: GROUP_TYPE_PUBLIC },
+    include: { owner: { select: { id: true, name: true } } },
+  });
+  if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  const members = await db.groupMember.findMany({ where: { groupId } });
+
+  res.json({ group: adminGroupShape(group, members.length) });
+});
+
+// GET /api/admin/community/groups/:groupId/members — admin roster for any
+// public group (active or dissolved). Same safe member serialization as the
+// customer roster.
+export const adminListGroupMembers = wrap(async function adminListGroupMembers(req, res, next, db = prisma) {
+  if (!req.user || req.user.role !== ROLES.ADMIN) {
+    return res.status(403).json({ error: "Only admins can manage community groups" });
+  }
+
+  const groupId = groupParam(req, res);
+  if (!groupId) return;
+
+  const limit = parseGroupLimit(req);
+  if (limit === null) {
+    return badRequest(res, `limit must be an integer from 1 to ${GROUP_LIMIT_MAX}`);
+  }
+
+  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC } });
+  if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  const where = { groupId };
+  const before = req.query?.before;
+  if (before !== undefined && before !== null && before !== "") {
+    const cursor = decodeCursor(before);
+    if (!cursor) return badRequest(res, "before must be a valid cursor");
+    const d = new Date(cursor.t);
+    where.OR = [{ joinedAt: { lt: d } }, { joinedAt: d, userId: { lt: cursor.i } }];
+  }
+
+  const rows = await db.groupMember.findMany({
+    where,
+    orderBy: [{ joinedAt: "desc" }, { userId: "desc" }],
+    take: limit + 1,
+    include: memberInclude,
+  });
+
+  const hasMore = rows.length > limit;
+  const members = rows.slice(0, limit);
+  const last = members[members.length - 1];
+  const nextCursor = hasMore && last ? encodeCursor(last.joinedAt, last.userId) : null;
+
+  res.json({ members: members.map(memberShape), hasMore, nextCursor });
+});
+
+// GET /api/admin/community/groups/:groupId/messages — admin feed for any public
+// group (active or dissolved). The customer-safe message shape is extended with
+// moderation attribution (deletedById/deletedAt) that only admins receive.
+export const adminListGroupMessages = wrap(async function adminListGroupMessages(req, res, next, db = prisma) {
+  if (!req.user || req.user.role !== ROLES.ADMIN) {
+    return res.status(403).json({ error: "Only admins can manage community groups" });
+  }
+
+  const groupId = groupParam(req, res);
+  if (!groupId) return;
+
+  const limit = parseGroupLimit(req);
+  if (limit === null) {
+    return badRequest(res, `limit must be an integer from 1 to ${GROUP_LIMIT_MAX}`);
+  }
+
+  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC } });
+  if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  const where = { groupId };
+  const before = req.query?.before;
+  if (before !== undefined && before !== null && before !== "") {
+    const cursor = decodeCursor(before);
+    if (!cursor) return badRequest(res, "before must be a valid cursor");
+    const d = new Date(cursor.t);
+    where.OR = [{ createdAt: { lt: d } }, { createdAt: d, id: { lt: cursor.i } }];
+  }
+
+  const rows = await db.groupMessage.findMany({
+    where,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    include: senderInclude,
+  });
+
+  const hasMore = rows.length > limit;
+  const messages = rows.slice(0, limit);
+  const last = messages[messages.length - 1];
+  const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
+
+  res.json({ messages: messages.map(adminMessageShape), hasMore, nextCursor });
+});
+
+// DELETE /api/admin/community/groups/:groupId/members/:userId — admin removes a
+// member from a public group. Only the membership row is deleted (never any
+// message). The owner cannot be removed this way (400): ownership only moves by
+// transfer or ends by dissolve, both owner actions. Idempotent: removing a
+// non-member is a success. Body/query userId is never trusted.
+export const adminRemoveGroupMember = wrap(async function adminRemoveGroupMember(req, res, next, db = prisma) {
+  if (!req.user || req.user.role !== ROLES.ADMIN) {
+    return res.status(403).json({ error: "Only admins can manage community groups" });
+  }
+
+  const groupId = groupParam(req, res);
+  if (!groupId) return;
+
+  const { userId } = req.params;
+  if (typeof userId !== "string" || !userId.trim()) return badRequest(res, "userId is required");
+
+  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC } });
+  if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  if (userId === group.ownerId) {
+    return res.status(400).json({ error: ADMIN_REMOVE_OWNER_ERROR });
+  }
+
+  const key = `group:admin:${req.user.id}`;
+  if (!adminGroupActionLimiter.allow(key)) return res.status(429).json({ error: TOO_MANY_ERROR });
+
+  try {
+    await db.groupMember.delete({ where: { groupId_userId: { groupId, userId } } });
+  } catch (error) {
+    if (error.code !== "P2025") throw error;
+  }
+
+  adminGroupActionLimiter.record(key);
+  res.json({ ok: true, groupId, memberId: userId, removed: true });
+});
+
+// DELETE /api/admin/community/groups/:groupId/messages/:messageId — admin
+// soft-deletes a group message. The row is kept and content is hidden, deletedAt
+// is set and deletedById records which admin moderated it. Idempotent on a
+// twice-deleted message; cross-group messageIds 404. Body messageId is never
+// trusted.
+export const adminDeleteGroupMessage = wrap(async function adminDeleteGroupMessage(req, res, next, db = prisma) {
+  if (!req.user || req.user.role !== ROLES.ADMIN) {
+    return res.status(403).json({ error: "Only admins can manage community groups" });
+  }
+
+  const groupId = groupParam(req, res);
+  if (!groupId) return;
+
+  const { messageId } = req.params;
+  if (typeof messageId !== "string" || !messageId) return badRequest(res, "messageId is required");
+
+  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC } });
+  if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  const message = await db.groupMessage.findFirst({
+    where: { id: messageId, groupId },
+    include: senderInclude,
+  });
+  if (!message) return res.status(404).json({ error: "Message not found" });
+
+  const key = `group:admin:${req.user.id}`;
+  if (!adminGroupActionLimiter.allow(key)) return res.status(429).json({ error: TOO_MANY_ERROR });
+
+  const updated = message.deletedAt
+    ? message
+    : await db.groupMessage.update({
+        where: { id: messageId },
+        data: { deletedAt: new Date(), deletedById: req.user.id },
+        include: senderInclude,
+      });
+
+  adminGroupActionLimiter.record(key);
+  res.json({ ok: true, message: adminMessageShape(updated) });
+});
+
+// POST /api/admin/community/groups/:groupId/dissolve — admin ends a public
+// group. Same soft dissolve as the owner path: only dissolvedAt is set, all
+// rows are preserved and the group stays inspectable by admins. Idempotent — an
+// already-dissolved group returns ok:true (unlike the customer 404, because
+// admins can see dissolved groups). Nonexistent groups still 404.
+export const adminDissolveGroup = wrap(async function adminDissolveGroup(req, res, next, db = prisma) {
+  if (!req.user || req.user.role !== ROLES.ADMIN) {
+    return res.status(403).json({ error: "Only admins can manage community groups" });
+  }
+
+  const groupId = groupParam(req, res);
+  if (!groupId) return;
+
+  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC } });
+  if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  const key = `group:admin:${req.user.id}`;
+  if (!adminGroupActionLimiter.allow(key)) return res.status(429).json({ error: TOO_MANY_ERROR });
+
+  if (!group.dissolvedAt) {
+    await db.group.update({
+      where: { id: groupId },
+      data: { dissolvedAt: new Date() },
+    });
+  }
+
+  adminGroupActionLimiter.record(key);
   res.json({ ok: true, groupId, dissolved: true });
 });
