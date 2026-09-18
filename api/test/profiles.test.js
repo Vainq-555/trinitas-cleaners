@@ -344,6 +344,37 @@ test("avatarUrl accepts only clean https URLs", async () => {
   assert.equal(cleared.body.profile.avatarUrl, null);
 });
 
+test("avatarUrl: null and empty/whitespace clear the avatar instead of throwing (500 regression)", async () => {
+  for (const v of [null, "", "   ", "\t"]) {
+    const db = makeDb({ profiles: [profileFixture({ avatarUrl: "https://cdn.example.com/old.jpg" })] });
+    const res = response();
+    await updateOwnProfile({ user: customerUser(), body: { avatarUrl: v } }, res, db);
+    assert.equal(res.statusCode, 200, `avatarUrl ${JSON.stringify(v)} must clear, not throw`);
+    assert.equal(res.body.profile.avatarUrl, null, `avatarUrl ${JSON.stringify(v)} must be stored as null`);
+  }
+});
+
+test("avatarUrl: valid https URL is stored trimmed", async () => {
+  const db = makeDb({ profiles: [profileFixture()] });
+  const res = response();
+  await updateOwnProfile(
+    { user: customerUser(), body: { avatarUrl: "  https://cdn.example.com/pic.jpg  " } },
+    res,
+    db,
+  );
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.profile.avatarUrl, "https://cdn.example.com/pic.jpg");
+});
+
+test("avatarUrl: invalid or non-string values are rejected with 400, never throw", async () => {
+  for (const v of ["http://example.com/a.png", "not-a-url", "https://", 123, true, ["https://cdn.example.com/x.jpg"]]) {
+    const db = makeDb({ profiles: [profileFixture()] });
+    const res = response();
+    await updateOwnProfile({ user: customerUser(), body: { avatarUrl: v } }, res, db);
+    assert.equal(res.statusCode, 400, `avatarUrl ${JSON.stringify(v)} must be rejected, not throw`);
+  }
+});
+
 test("forged body userId cannot move the profile to another user", async () => {
   const db = makeDb({ profiles: [profileFixture()] });
   const res = response();

@@ -162,7 +162,7 @@ export const updateOwnProfile = wrap(async function updateOwnProfile(req, res, n
     data.bio = typeof body.bio === "string" && body.bio.trim() ? body.bio.trim() : null;
   }
   if (body.avatarUrl !== undefined) {
-    if (typeof body.avatarUrl === "string" && !body.avatarUrl.trim()) {
+    if (body.avatarUrl === null || (typeof body.avatarUrl === "string" && !body.avatarUrl.trim())) {
       data.avatarUrl = null;
     } else if (!isValidAvatarUrl(body.avatarUrl)) {
       return badRequest(res, "avatarUrl must be a valid https URL");
