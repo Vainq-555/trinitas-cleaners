@@ -37,6 +37,9 @@ model User {
   reviews          Review[]
   communityMessages CommunityMessage[]
   communityProfile CommunityProfile?
+  groupMembers    GroupMember[]
+  groupMessages   GroupMessage[]
+  groupsOwned     Group[]           @relation("GroupOwner")
   messagesSent   Message[]           @relation("Sender")
   messagesRecv   Message[]           @relation("Receiver")
   customPrices   CustomPrice[]
@@ -293,6 +296,55 @@ model CommunityProfile {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([displayName])
+}
+
+// "public" | "private" | "invite_only" — string-validated app-side (G1b+)
+model Group {
+  id          String   @id @default(cuid())
+  ownerId     String
+  name        String
+  description String?
+  type        String   @default("public")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  dissolvedAt DateTime?
+
+  owner    User          @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members  GroupMember[]
+  messages GroupMessage[]
+
+  @@index([ownerId])
+  @@index([dissolvedAt])
+  @@index([createdAt])
+  @@index([type])
+}
+
+model GroupMember {
+  groupId  String
+  userId   String
+  joinedAt DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@index([userId])
+}
+
+model GroupMessage {
+  id          String    @id @default(cuid())
+  groupId     String
+  senderId    String
+  content     String
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
+  deletedById String?
+
+  group  Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sender User  @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, createdAt])
+  @@index([senderId])
 }
 
 // "notification" | "announcement"

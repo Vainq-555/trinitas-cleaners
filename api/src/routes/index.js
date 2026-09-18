@@ -10,6 +10,7 @@ import * as broadcasts from "../controllers/broadcasts.js";
 import * as content from "../controllers/content.js";
 import * as community from "../controllers/community.js";
 import * as profiles from "../controllers/profiles.js";
+import * as groups from "../controllers/groups.js";
 import * as reviews from "../controllers/reviews.js";
 import * as users from "../controllers/users.js";
 import * as businessInfo from "../controllers/businessInfo.js";
@@ -66,6 +67,21 @@ router.post("/reviews", authenticate, requireCustomer, reviews.createReview);
 
 router.get("/community/messages", authenticate, requireCustomer, community.listCommunityMessages);
 router.post("/community/messages", authenticate, requireCustomer, community.createCommunityMessage);
+
+router.get("/community/groups", authenticate, requireCustomer, groups.listGroups);
+router.post("/community/groups", authenticate, requireCustomer, groups.createGroup);
+router.get("/community/groups/:groupId", authenticate, requireCustomer, groups.getGroup);
+router.post("/community/groups/:groupId/join", authenticate, requireCustomer, groups.joinGroup);
+router.post("/community/groups/:groupId/leave", authenticate, requireCustomer, groups.leaveGroup);
+
+router.get("/community/groups/:groupId/members", authenticate, requireCustomer, groups.listGroupMembers);
+router.get("/community/groups/:groupId/messages", authenticate, requireCustomer, groups.listGroupMessages);
+router.post("/community/groups/:groupId/messages", authenticate, requireCustomer, groups.sendGroupMessage);
+router.delete("/community/groups/:groupId/messages/:messageId", authenticate, requireCustomer, groups.deleteGroupMessage);
+router.patch("/community/groups/:groupId", authenticate, requireCustomer, groups.updateGroup);
+router.delete("/community/groups/:groupId/members/:userId", authenticate, requireCustomer, groups.removeGroupMember);
+router.post("/community/groups/:groupId/transfer", authenticate, requireCustomer, groups.transferGroupOwner);
+router.post("/community/groups/:groupId/dissolve", authenticate, requireCustomer, groups.dissolveGroup);
 
 router.get("/profile", authenticate, requireCustomer, profiles.getOwnProfile);
 router.put("/profile", authenticate, requireCustomer, profiles.updateOwnProfile);
