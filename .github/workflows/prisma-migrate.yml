@@ -46,5 +46,13 @@ jobs:
         # its SQL. Tolerated failure: the deploy step below is the gate.
         run: npx prisma migrate resolve --applied 20260820184053_init || true
 
+      - name: Mark failed Groups migration as rolled back
+        # The first attempt of 20260920000000_add_community_groups failed on a
+        # missing dissolvedAt column (fixed in a later corrective commit) and
+        # left a failed record in _prisma_migrations. Mark ONLY that migration
+        # as rolled back so migrate deploy can re-apply the corrected file.
+        # Tolerated failure: guarded no-op when no failed record exists.
+        run: npx prisma migrate resolve --rolled-back 20260920000000_add_community_groups || true
+
       - name: Apply Prisma migrations
         run: npx prisma migrate deploy
