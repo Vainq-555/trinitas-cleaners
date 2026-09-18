@@ -12,6 +12,7 @@ CREATE TABLE "Group" (
     "type" TEXT NOT NULL DEFAULT 'public',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "dissolvedAt" TIMESTAMP(3),
 
     CONSTRAINT "Group_pkey" PRIMARY KEY ("id")
 );
