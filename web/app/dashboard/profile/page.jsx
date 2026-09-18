@@ -12,7 +12,7 @@ import {
   PROFILE_BIO_MAX,
   PROFILE_CITY_MAX,
   PROFILE_DISPLAY_NAME_MAX,
-  isValidAvatarUrl,
+  normalizeAvatarUrl,
   normalizeBio,
   normalizeCity,
   normalizeDisplayName,
@@ -94,7 +94,7 @@ export default function OwnProfilePage() {
     const checks = [
       ["displayName", normalizeDisplayName(form.displayName)],
       ["bio", normalizeBio(form.bio)],
-      ["avatarUrl", isValidAvatarUrl(form.avatarUrl) ? { value: form.avatarUrl.trim() } : { error: "Avatar must be a valid https URL" }],
+      ["avatarUrl", normalizeAvatarUrl(form.avatarUrl)],
       ["locationCity", normalizeCity(form.locationCity)],
       ["locationState", normalizeState(form.locationState)],
     ];
@@ -111,7 +111,7 @@ export default function OwnProfilePage() {
     try {
       const payload = toOwnPayload({
         ...form,
-        avatarUrl: form.avatarUrl.trim() === "" ? null : form.avatarUrl.trim(),
+        avatarUrl: normalizeAvatarUrl(form.avatarUrl).value ?? null,
         bio: form.bio.trim() === "" ? null : form.bio.trim(),
         locationCity: form.locationCity.trim() === "" ? null : form.locationCity.trim(),
         locationState: form.locationState.trim() === "" ? null : form.locationState.trim(),
@@ -139,7 +139,7 @@ export default function OwnProfilePage() {
     }
   };
 
-  const avatarPreview = isValidAvatarUrl(form.avatarUrl) && form.avatarUrl.trim() ? form.avatarUrl.trim() : null;
+  const avatarPreview = normalizeAvatarUrl(form.avatarUrl).value ?? null;
 
   return (
     <Shell links={links} sections={["Customer Portal", "Community"]} title="Your Profile"

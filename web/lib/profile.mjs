@@ -78,6 +78,17 @@ export function normalizeState(v) {
   return { value: trimmed.toUpperCase() };
 }
 
+// avatarUrl: optional https URL. null/undefined/empty/whitespace clears to
+// null (no avatar); a valid https URL is trimmed; anything else errors.
+// Never calls .trim() unless v is already a string.
+export function normalizeAvatarUrl(v) {
+  if (v === undefined || v === null) return { value: null };
+  if (typeof v !== "string") return { error: "Avatar must be a valid https URL" };
+  const trimmed = v.trim();
+  if (trimmed === "") return { value: null };
+  return isValidAvatarUrl(trimmed) ? { value: trimmed } : { error: "Avatar must be a valid https URL" };
+}
+
 export function isValidBoolean(v, label) {
   return typeof v === "boolean" ? { value: v } : { error: `${label} must be enabled or disabled` };
 }
@@ -89,7 +100,7 @@ export function validateProfileDraft(body = {}) {
   const pairs = [
     ["displayName", normalizeDisplayName],
     ["bio", normalizeBio],
-    ["avatarUrl", (v) => (isValidAvatarUrl(v) ? (v && v.trim() ? { value: v.trim() } : { value: null }) : { error: "Avatar must be a valid https URL" })],
+    ["avatarUrl", normalizeAvatarUrl],
     ["locationCity", normalizeCity],
     ["locationState", normalizeState],
     ["showOnline", (v) => isValidBoolean(v, "Show online")],

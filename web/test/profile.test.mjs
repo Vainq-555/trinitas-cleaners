@@ -8,6 +8,7 @@ import {
   PUBLIC_PROFILE_KEYS,
   isOnlineFromLastActive,
   isValidAvatarUrl,
+  normalizeAvatarUrl,
   normalizeBio,
   normalizeCity,
   normalizeDisplayName,
@@ -60,6 +61,55 @@ test("avatarUrl validation: https only, no credentials", () => {
   }
   assert.equal(isValidAvatarUrl(null), true);
   assert.equal(isValidAvatarUrl(""), true);
+});
+
+test("normalizeAvatarUrl: null/empty/whitespace clears to null, never trims null", () => {
+  assert.equal(normalizeAvatarUrl(null).value, null);
+  assert.equal(normalizeAvatarUrl(undefined).value, null);
+  assert.equal(normalizeAvatarUrl("").value, null);
+  assert.equal(normalizeAvatarUrl("   ").value, null);
+  assert.equal(normalizeAvatarUrl("  https://cdn.example.com/a.jpg  ").value, "https://cdn.example.com/a.jpg");
+  for (const bad of ["http://example.com/a.png", "https://u:p@example.com/a.png", 42, false]) {
+    assert.equal(normalizeAvatarUrl(bad).error, "Avatar must be a valid https URL");
+  }
+});
+
+test("profile with all-optional-null fields renders a safe editor form (no null.trim)", () => {
+  const profile = {
+    userId: "cus-ada",
+    displayName: "Ada",
+    bio: null,
+    avatarUrl: null,
+    locationCity: null,
+    locationState: null,
+    showOnline: true,
+    profileVisible: true,
+    moderationHiddenAt: null,
+  };
+  const formOf = (p) => ({
+    displayName: p.displayName ?? "",
+    bio: p.bio ?? "",
+    avatarUrl: p.avatarUrl ?? "",
+    locationCity: p.locationCity ?? "",
+    locationState: p.locationState ?? "",
+    showOnline: p.showOnline ?? true,
+    profileVisible: p.profileVisible ?? true,
+  });
+  const avatarPreviewOf = (v) => normalizeAvatarUrl(v).value ?? null;
+
+  assert.doesNotThrow(() => {
+    const form = formOf(profile);
+    assert.equal(form.displayName, "Ada");
+    assert.equal(form.bio, "");
+    assert.equal(form.avatarUrl, "");
+    assert.equal(form.locationCity, "");
+    assert.equal(form.locationState, "");
+    assert.equal(form.showOnline, true);
+    assert.equal(form.profileVisible, true);
+    assert.equal(avatarPreviewOf(form.avatarUrl), null);
+    const payload = toOwnPayload({ ...form, avatarUrl: avatarPreviewOf(form.avatarUrl) });
+    assert.equal(payload.avatarUrl, null);
+  });
 });
 
 test("validateProfileDraft: trims, preserves partials, rejects empties and bad types", () => {
