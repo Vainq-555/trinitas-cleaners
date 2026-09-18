@@ -198,12 +198,20 @@ export default function CommunityPage() {
             <div className="font-bold text-ink">Customer Community</div>
             <div className="text-xs text-muted">A shared space for all Trinitas-Cleaners customers</div>
           </div>
-          <Link
-            href="/dashboard/profile"
-            className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-clean-light px-3 py-1.5 text-xs font-semibold text-clean hover:underline"
-          >
-            <UserRound size={14} /> Your profile
-          </Link>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            <Link
+              href="/dashboard/community/groups"
+              className="inline-flex items-center gap-1.5 rounded-full bg-clean-light px-3 py-1.5 text-xs font-semibold text-clean hover:underline"
+            >
+              <Users size={14} /> Browse groups
+            </Link>
+            <Link
+              href="/dashboard/profile"
+              className="inline-flex items-center gap-1.5 rounded-full bg-clean-light px-3 py-1.5 text-xs font-semibold text-clean hover:underline"
+            >
+              <UserRound size={14} /> Your profile
+            </Link>
+          </div>
         </div>
 
         {/* Messages */}
