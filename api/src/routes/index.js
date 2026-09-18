@@ -9,6 +9,7 @@ import * as messages from "../controllers/messages.js";
 import * as broadcasts from "../controllers/broadcasts.js";
 import * as content from "../controllers/content.js";
 import * as community from "../controllers/community.js";
+import * as profiles from "../controllers/profiles.js";
 import * as reviews from "../controllers/reviews.js";
 import * as users from "../controllers/users.js";
 import * as businessInfo from "../controllers/businessInfo.js";
@@ -66,6 +67,10 @@ router.post("/reviews", authenticate, requireCustomer, reviews.createReview);
 router.get("/community/messages", authenticate, requireCustomer, community.listCommunityMessages);
 router.post("/community/messages", authenticate, requireCustomer, community.createCommunityMessage);
 
+router.get("/profile", authenticate, requireCustomer, profiles.getOwnProfile);
+router.put("/profile", authenticate, requireCustomer, profiles.updateOwnProfile);
+router.get("/profile/:userId", authenticate, requireCustomer, profiles.getPublicProfile);
+
 // ---------- Admin ----------
 const adminOnly = [authenticate, requireAdmin];
 
@@ -117,6 +122,11 @@ router.get("/admin/community/messages", adminOnly, community.adminListCommunityM
 router.get("/admin/community/users", adminOnly, community.adminListCommunityUsers);
 router.post("/admin/community/users/:id/block", adminOnly, community.adminBlockUser);
 router.post("/admin/community/users/:id/unblock", adminOnly, community.adminUnblockUser);
+
+router.get("/admin/community/profiles", adminOnly, profiles.adminListProfiles);
+router.get("/admin/community/profiles/:userId", adminOnly, profiles.adminGetProfile);
+router.post("/admin/community/profiles/:userId/hide", adminOnly, profiles.adminHideProfile);
+router.post("/admin/community/profiles/:userId/unhide", adminOnly, profiles.adminUnhideProfile);
 
 router.get("/admin/business-information", adminOnly, businessInfo.adminGetBusinessInfo);
 router.put("/admin/business-information", adminOnly, businessInfo.adminPutBusinessInfo);

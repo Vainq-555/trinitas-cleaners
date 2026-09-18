@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
   MessageSquare, Megaphone, Star, Ban, UserCheck, MessageCircle, Inbox,
-  RefreshCw, BadgePercent, Wrench, BookOpen, Store,
+  RefreshCw, BadgePercent, Wrench, BookOpen, Store, Eye, EyeOff, UserRound,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api, fmtDateTime } from "@/lib/api";
@@ -39,10 +39,12 @@ export default function AdminCommunityPage() {
   const [messages, setMessages] = useState([]);
   const [page, setPage] = useState({ hasMore: false, nextBefore: null });
   const [users, setUsers] = useState([]);
+  const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [paging, setPaging] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [profileBusyId, setProfileBusyId] = useState(null);
   const [notice, setNotice] = useState("");
   const [err, setErr] = useState("");
 
@@ -59,13 +61,15 @@ export default function AdminCommunityPage() {
     setLoadError("");
     try {
       const q = toQuery(feedQuery({ limit: 100 }));
-      const [feed, statuses] = await Promise.all([
+      const [feed, statuses, profileRows] = await Promise.all([
         api(`/admin/community/messages?${q}`),
         api("/admin/community/users"),
+        api("/admin/community/profiles"),
       ]);
       setMessages(feed.messages || []);
       setPage({ hasMore: feed.hasMore, nextBefore: feed.nextBefore });
       setUsers(statuses.users || []);
+      setProfiles(profileRows.profiles || []);
     } catch (e) {
       setLoadError(e.message || "Couldn't load the community. Please try again.");
     } finally {
@@ -167,6 +171,44 @@ export default function AdminCommunityPage() {
   // reloading the whole app. The customer stays visible in the feed.
   const applyStatus = (user) => {
     setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, communityBlockedAt: user.communityBlockedAt } : u)));
+  };
+
+  // Profile moderation hides/unhides the public profile only. Admin NEVER
+  // edits profile content and never impersonates the customer.
+  const hideProfile = async (profile) => {
+    setErr("");
+    if (!confirm(
+      `Hide ${profile.displayName.trim() || "this customer"}'s community profile from other customers?\n\nThis only hides their public profile. It does not delete their account, block posting, or affect bookings, payments, or your private messages. Their profile content is never changed.`
+    )) return;
+    setProfileBusyId(profile.userId);
+    try {
+      const result = await api(`/admin/community/profiles/${profile.userId}/hide`, { method: "POST" });
+      applyProfile(result.profile);
+      setNotice(`${profile.displayName.trim() || "This customer"}'s profile is hidden from other customers.`);
+    } catch (e) {
+      setErr(moderationError(e));
+    } finally {
+      setProfileBusyId(null);
+    }
+  };
+
+  const unhideProfile = async (profile) => {
+    setErr("");
+    if (!confirm(`Show ${profile.displayName.trim() || "this customer"}'s community profile to other customers again?`)) return;
+    setProfileBusyId(profile.userId);
+    try {
+      const result = await api(`/admin/community/profiles/${profile.userId}/unhide`, { method: "POST" });
+      applyProfile(result.profile);
+      setNotice(`${profile.displayName.trim() || "This customer"}'s profile is visible again.`);
+    } catch (e) {
+      setErr(moderationError(e));
+    } finally {
+      setProfileBusyId(null);
+    }
+  };
+
+  const applyProfile = (profile) => {
+    setProfiles((prev) => prev.map((p) => (p.userId === profile.userId ? profile : p)));
   };
 
   const shown = chronological(messages);
@@ -271,6 +313,70 @@ export default function AdminCommunityPage() {
             </>
           )}
         </div>
+      </div>
+
+      <div className="card mt-6 overflow-hidden">
+        <div className="flex items-center gap-3 border-b border-line px-5 py-3.5">
+          <span className="grid h-10 w-10 place-items-center rounded-full bg-clean-light text-clean">
+            <UserRound size={18} />
+          </span>
+          <div>
+            <div className="font-bold text-ink">Community Profiles</div>
+            <div className="text-xs text-muted">Hide or show a customer's public profile</div>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="empty-state">Loading profiles…</div>
+        ) : profiles.length === 0 ? (
+          <div className="empty-state">
+            <p className="font-semibold text-ink">No profiles yet.</p>
+            <p className="text-sm">Customers get a profile the first time they open it.</p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-line">
+            {profiles.map((p) => {
+              const isHidden = Boolean(p.moderationHiddenAt);
+              const location = [p.locationCity, p.locationState].filter(Boolean).join(", ");
+              return (
+                <li key={p.userId} className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="font-bold text-ink">{p.displayName || "Community member"}</span>
+                      <span className="text-[11px] text-muted">{p.userId}</span>
+                      {p.online !== undefined && (
+                        <span className={`text-[11px] font-semibold ${p.online ? "text-emerald-600" : "text-muted"}`}>
+                          {p.online ? "Online" : "Offline"}
+                        </span>
+                      )}
+                    </div>
+                    {location && <p className="mt-0.5 text-xs text-muted">{location}</p>}
+                    {p.bio && <p className="mt-1 line-clamp-2 text-sm text-slate-600">{p.bio}</p>}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
+                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide border ${
+                      isHidden ? "bg-warnbg text-amber-700 border-amber-200" : "bg-okbg text-clean-dark border-green-200"
+                    }`}>
+                      {isHidden ? "Hidden" : "Visible"}
+                    </span>
+                    <button
+                      className="btn btn-outline btn-sm"
+                      disabled={profileBusyId === p.userId}
+                      onClick={() => (isHidden ? unhideProfile(p) : hideProfile(p))}
+                    >
+                      {isHidden ? <Eye size={13} /> : <EyeOff size={13} />}
+                      {profileBusyId === p.userId
+                        ? "Working…"
+                        : isHidden
+                          ? "Show profile"
+                          : "Hide profile"}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     </Shell>
   );

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings, Star,
-  Users, Send, RefreshCw,
+  Users, Send, RefreshCw, UserRound,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api, fmtDateTime } from "@/lib/api";
@@ -197,6 +198,12 @@ export default function CommunityPage() {
             <div className="font-bold text-ink">Customer Community</div>
             <div className="text-xs text-muted">A shared space for all Trinitas-Cleaners customers</div>
           </div>
+          <Link
+            href="/dashboard/profile"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-clean-light px-3 py-1.5 text-xs font-semibold text-clean hover:underline"
+          >
+            <UserRound size={14} /> Your profile
+          </Link>
         </div>
 
         {/* Messages */}
@@ -235,7 +242,13 @@ export default function CommunityPage() {
                   <div key={m.id} className="flex">
                     <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-bl-sm bg-white border border-line px-4 py-2.5 text-sm text-ink">
                       <div className="text-[11px] text-muted">
-                        <span className="font-semibold text-ink">{m.customer?.name || "Community member"}</span>
+                        {m.customer?.id ? (
+                          <Link href={`/dashboard/profile/${encodeURIComponent(m.customer.id)}`} className="font-semibold text-ink hover:underline">
+                            {m.customer?.name || "Community member"}
+                          </Link>
+                        ) : (
+                          <span className="font-semibold text-ink">{m.customer?.name || "Community member"}</span>
+                        )}
                         {" · "}
                         {fmtDateTime(m.createdAt)}
                       </div>

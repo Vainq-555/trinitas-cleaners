@@ -123,3 +123,49 @@ export function isValidCommunityMessage(v) {
 export function isValidCommunityLimit(v) {
   return Number.isInteger(v) && v >= 1 && v <= COMMUNITY_LIMIT_MAX;
 }
+
+// ---- Community profiles ----
+
+export const PROFILE_DISPLAY_NAME_MAX = 100;
+export const PROFILE_BIO_MAX = 500;
+export const PROFILE_CITY_MAX = 80;
+
+export function isValidProfileDisplayName(v) {
+  return typeof v === "string" && v.trim().length >= 1 && v.trim().length <= PROFILE_DISPLAY_NAME_MAX;
+}
+
+// Optional text fields: undefined/null/"" are cleared to null; otherwise a
+// trimmed string within the bound. Keeps "" and whitespace from leaking in.
+export function isValidProfileBio(v) {
+  return v === undefined || v === null || v === "" || (typeof v === "string" && v.trim().length <= PROFILE_BIO_MAX);
+}
+
+// Optional general location. Reuses the business-info/city conventions.
+export function isValidProfileCity(v) {
+  return v === undefined || v === null || v === "" || (typeof v === "string" && v.trim().length >= 1 && v.trim().length <= PROFILE_CITY_MAX);
+}
+
+export function isValidProfileState(v) {
+  return v === undefined || v === null || v === "" || (typeof v === "string" && /^[A-Za-z]{2}$/.test(v.trim()));
+}
+
+// Avatar must be an absolute https: URL with no embedded credentials. Accepts
+// common image/bare paths; the upload/storage mechanism itself is out of scope
+// for this phase (only the URL is stored).
+export function isValidAvatarUrl(v) {
+  if (v === undefined || v === null || v === "") return true;
+  if (typeof v !== "string") return false;
+  let u;
+  try {
+    u = new URL(v);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:") return false;
+  if (u.username || u.password) return false;
+  return u.hostname.length > 0;
+}
+
+export function isValidProfileBoolean(v) {
+  return typeof v === "boolean";
+}

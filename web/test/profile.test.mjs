@@ -1,0 +1,136 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  ONLINE_TTL_MS,
+  PROFILE_BIO_MAX,
+  PROFILE_CITY_MAX,
+  PROFILE_DISPLAY_NAME_MAX,
+  PUBLIC_PROFILE_KEYS,
+  isOnlineFromLastActive,
+  isValidAvatarUrl,
+  normalizeBio,
+  normalizeCity,
+  normalizeDisplayName,
+  normalizeState,
+  onlineOf,
+  toOwnPayload,
+  toPublicShape,
+  validateProfileDraft,
+} from "../lib/profile.mjs";
+
+test("displayName normalization: trimming, required, boundaries", () => {
+  assert.equal(normalizeDisplayName("  Alice C  ").value, "Alice C");
+  assert.equal(normalizeDisplayName(undefined).error, "Display name is required");
+  assert.equal(normalizeDisplayName("   ").error, "Display name is required");
+  assert.equal(normalizeDisplayName(123).error, "Display name is required");
+  assert.equal(normalizeDisplayName("x".repeat(PROFILE_DISPLAY_NAME_MAX)).value.length, PROFILE_DISPLAY_NAME_MAX);
+  assert.ok(normalizeDisplayName("x".repeat(PROFILE_DISPLAY_NAME_MAX + 1)).error);
+});
+
+test("bio normalization: boundaries, trim, clear-to-null", () => {
+  assert.equal(normalizeBio("  hi  ").value, "hi");
+  assert.equal(normalizeBio("   ").value, null);
+  assert.equal(normalizeBio(null).value, null);
+  assert.equal(normalizeBio(undefined).value, null);
+  assert.equal(normalizeBio(42).error, "Bio must be text");
+  assert.equal(normalizeBio("x".repeat(PROFILE_BIO_MAX)).value.length, PROFILE_BIO_MAX);
+  assert.ok(normalizeBio("x".repeat(PROFILE_BIO_MAX + 1)).error);
+});
+
+test("city normalization: trim, clear-to-null, boundary", () => {
+  assert.equal(normalizeCity("  Minneapolis  ").value, "Minneapolis");
+  assert.equal(normalizeCity("  ").value, null);
+  assert.equal(normalizeCity(null).value, null);
+  assert.equal(normalizeCity("x".repeat(PROFILE_CITY_MAX)).value.length, PROFILE_CITY_MAX);
+  assert.ok(normalizeCity("x".repeat(PROFILE_CITY_MAX + 1)).error);
+});
+
+test("state normalization: exactly two letters, uppercased, clear-to-null", () => {
+  assert.equal(normalizeState(" mn ").value, "MN");
+  assert.equal(normalizeState("MI").value, "MI");
+  assert.equal(normalizeState("  ").value, null);
+  assert.equal(normalizeState(null).value, null);
+  for (const bad of ["MNX", "m", "12", "min", 5]) assert.ok(normalizeState(bad).error);
+});
+
+test("avatarUrl validation: https only, no credentials", () => {
+  for (const good of ["https://cdn.example.com/a.jpg", "https://example.com/path/a.png?x=1"]) assert.ok(isValidAvatarUrl(good));
+  for (const bad of ["http://example.com/a.png", "ftp://example.com/a.png", "not-a-url", "https://", "https://u:p@example.com/a.png", 42]) {
+    assert.ok(!isValidAvatarUrl(bad));
+  }
+  assert.equal(isValidAvatarUrl(null), true);
+  assert.equal(isValidAvatarUrl(""), true);
+});
+
+test("validateProfileDraft: trims, preserves partials, rejects empties and bad types", () => {
+  const r = validateProfileDraft({ displayName: "  Alice  ", bio: " hi ", locationState: "mn" });
+  assert.deepEqual(r.values, { displayName: "Alice", bio: "hi", locationState: "MN" });
+  assert.equal(validateProfileDraft({ displayName: " " }).error, "Display name is required");
+  assert.equal(validateProfileDraft({ showOnline: "yes" }).error, "Show online must be enabled or disabled");
+  assert.equal(validateProfileDraft({ profileVisible: 1 }).error, "Profile visibility must be enabled or disabled");
+  assert.equal(validateProfileDraft({ avatarUrl: "http://x" }).error, "Avatar must be a valid https URL");
+  assert.equal(validateProfileDraft({ userId: "forged", id: "x" }).error, "No editable profile fields provided");
+  assert.equal(validateProfileDraft({}).error, "No editable profile fields provided");
+  assert.equal(validateProfileDraft({ maintenance: true }).error, "No editable profile fields provided");
+});
+
+test("toOwnPayload: only editable keys, never immutable/unknown", () => {
+  const draft = { displayName: "A", userId: "mallory", id: "x", moderationHiddenAt: null, avatarUrl: "https://x/a.png" };
+  const payload = toOwnPayload(draft);
+  assert.deepEqual(Object.keys(payload).sort(), ["avatarUrl", "displayName"].sort());
+  assert.equal(payload.userId, undefined);
+  assert.equal(payload.id, undefined);
+  assert.equal(payload.moderationHiddenAt, undefined);
+});
+
+test("online gating: recent true, stale false, non-numeric false", () => {
+  const recent = Date.now() - 1000;
+  const stale = Date.now() - ONLINE_TTL_MS - 60_000;
+  assert.equal(isOnlineFromLastActive(recent), true);
+  assert.equal(isOnlineFromLastActive(stale), false);
+  assert.equal(isOnlineFromLastActive(null), false);
+  assert.equal(isOnlineFromLastActive("x"), false);
+  assert.equal(isOnlineFromLastActive(Date.now() - ONLINE_TTL_MS), false);
+});
+
+test("onlineOf: undefined when profile opted out, boolean otherwise", () => {
+  assert.equal(onlineOf({ online: true }), true);
+  assert.equal(onlineOf({ online: false }), false);
+  assert.equal(onlineOf({}), null);
+  assert.equal(onlineOf({ online: "yes" }), false);
+  assert.equal(onlineOf(null), null);
+});
+
+test("toPublicShape: only the approved public keys survive", () => {
+  const fake = {
+    userId: "cus1",
+    displayName: "Alice",
+    bio: "b",
+    avatarUrl: "https://x/a.png",
+    locationCity: "Minneapolis",
+    locationState: "MN",
+    online: true,
+    email: "alice@x.com",
+    phone: "555",
+    address: "1 Main St",
+    passwordHash: "hash",
+    role: "customer",
+    status: "online",
+    lastActiveAt: 123,
+    communityBlockedAt: null,
+    secret: "s",
+    token: "t",
+  };
+  const out = toPublicShape(fake);
+  assert.deepEqual(Object.keys(out).sort(), [...PUBLIC_PROFILE_KEYS].sort());
+  const payload = JSON.stringify(out);
+  for (const forbidden of ["email", "phone", "address", "password", "role", "status", "lastActiveAt", "communityBlockedAt", "secret", "token"]) {
+    assert.ok(!payload.toLowerCase().includes(forbidden.toLowerCase()), `must not include ${forbidden}`);
+  }
+  assert.equal(out.userId, "cus1");
+});
+
+test("toPublicShape tolerates null and non-objects", () => {
+  assert.equal(toPublicShape(null), null);
+  assert.equal(toPublicShape(undefined), null);
+});
