@@ -112,6 +112,84 @@ test("profile with all-optional-null fields renders a safe editor form (no null.
   });
 });
 
+// Mirrors the page's Save handler: validate each editable field, collect the
+// normalized values, and build the PUT payload from those values (never by
+// re-trimming raw form.* inputs). This pins the null-saving regression class.
+const buildSavePayload = (f) => {
+  const checks = [
+    ["displayName", normalizeDisplayName(f.displayName)],
+    ["bio", normalizeBio(f.bio)],
+    ["avatarUrl", normalizeAvatarUrl(f.avatarUrl)],
+    ["locationCity", normalizeCity(f.locationCity)],
+    ["locationState", normalizeState(f.locationState)],
+  ];
+  const values = {};
+  for (const [key, out] of checks) {
+    if (out.error) return { error: out.error };
+    values[key] = out.value;
+  }
+  return {
+    payload: toOwnPayload({
+      ...f,
+      displayName: values.displayName,
+      avatarUrl: values.avatarUrl ?? null,
+      bio: values.bio ?? null,
+      locationCity: values.locationCity ?? null,
+      locationState: values.locationState ?? null,
+    }),
+  };
+};
+
+test("profile Save payload: built from normalized values, null-optionals never trimmed", () => {
+  const nullForm = {
+    displayName: "Ada",
+    bio: null,
+    avatarUrl: null,
+    locationCity: null,
+    locationState: null,
+    showOnline: true,
+    profileVisible: true,
+  };
+  assert.doesNotThrow(() => {
+    const { payload } = buildSavePayload(nullForm);
+    assert.equal(payload.displayName, "Ada");
+    assert.equal(payload.bio, null);
+    assert.equal(payload.avatarUrl, null);
+    assert.equal(payload.locationCity, null);
+    assert.equal(payload.locationState, null);
+    assert.equal(payload.showOnline, true);
+    assert.equal(payload.profileVisible, true);
+  });
+});
+
+test("profile Save payload: normalizes strings, clears empties/whitespace, rejects invalid", () => {
+  const base = { displayName: "Ada", bio: null, avatarUrl: null, locationCity: null, locationState: null, showOnline: true, profileVisible: true };
+  const { payload } = buildSavePayload({
+    ...base,
+    displayName: "  Ada Lovelace  ",
+    bio: "  hello world  ",
+    avatarUrl: "  https://cdn.example.com/a.jpg  ",
+    locationCity: "  Minneapolis  ",
+    locationState: " mn ",
+  });
+  assert.equal(payload.displayName, "Ada Lovelace");
+  assert.equal(payload.bio, "hello world");
+  assert.equal(payload.avatarUrl, "https://cdn.example.com/a.jpg");
+  assert.equal(payload.locationCity, "Minneapolis");
+  assert.equal(payload.locationState, "MN");
+
+  const blank = buildSavePayload({ ...base, bio: "   ", locationCity: "", locationState: "  " });
+  assert.equal(blank.payload.bio, null);
+  assert.equal(blank.payload.locationCity, null);
+  assert.equal(blank.payload.locationState, null);
+
+  assert.equal(buildSavePayload({ ...base, avatarUrl: "http://x" }).error, "Avatar must be a valid https URL");
+  assert.equal(buildSavePayload({ ...base, avatarUrl: 42 }).error, "Avatar must be a valid https URL");
+  assert.equal(buildSavePayload({ ...base, displayName: " " }).error, "Display name is required");
+  assert.equal(buildSavePayload({ ...base, bio: 42 }).error, "Bio must be text");
+  assert.equal(buildSavePayload({ ...base, locationState: "MNX" }).error, "State must be a two-letter code");
+});
+
 test("validateProfileDraft: trims, preserves partials, rejects empties and bad types", () => {
   const r = validateProfileDraft({ displayName: "  Alice  ", bio: " hi ", locationState: "mn" });
   assert.deepEqual(r.values, { displayName: "Alice", bio: "hi", locationState: "MN" });

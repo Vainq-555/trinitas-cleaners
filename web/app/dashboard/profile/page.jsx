@@ -98,11 +98,13 @@ export default function OwnProfilePage() {
       ["locationCity", normalizeCity(form.locationCity)],
       ["locationState", normalizeState(form.locationState)],
     ];
+    const values = {};
     for (const [key, out] of checks) {
       if (out.error) {
         setFieldErr(out.error);
         return;
       }
+      values[key] = out.value;
     }
 
     setSaving(true);
@@ -111,10 +113,11 @@ export default function OwnProfilePage() {
     try {
       const payload = toOwnPayload({
         ...form,
-        avatarUrl: normalizeAvatarUrl(form.avatarUrl).value ?? null,
-        bio: form.bio.trim() === "" ? null : form.bio.trim(),
-        locationCity: form.locationCity.trim() === "" ? null : form.locationCity.trim(),
-        locationState: form.locationState.trim() === "" ? null : form.locationState.trim(),
+        displayName: values.displayName,
+        avatarUrl: values.avatarUrl ?? null,
+        bio: values.bio ?? null,
+        locationCity: values.locationCity ?? null,
+        locationState: values.locationState ?? null,
       });
       const data = await api("/profile", { method: "PUT", body: payload });
       const p = data?.profile;
