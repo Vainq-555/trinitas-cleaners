@@ -309,17 +309,18 @@ test("admin groups: dissolved groups stay visible with status dissolved", async 
   assert.equal(res.body.items[0].dissolvedAt.getTime(), t("2026-09-10T00:00:00Z").getTime());
 });
 
-test("admin groups: non-public groups are excluded from discovery", async () => {
+test("admin groups: non-public groups appear in discovery (admins see all types)", async () => {
   const db = makeDb({
     groups: [
       groupFixture({ id: "grp1" }),
       groupFixture({ id: "grp2", type: "private", name: "Secret" }),
+      groupFixture({ id: "grp3", type: "invite_only", name: "Invite Club" }),
     ],
   });
   const res = response();
   await adminListGroups({ user: adminUser(), query: {} }, res, db);
-  assert.equal(res.body.items.length, 1);
-  assert.equal(res.body.items[0].id, "grp1");
+  assert.deepEqual(res.body.items.map((g) => g.id).sort(), ["grp1", "grp2", "grp3"]);
+  assert.equal(res.body.items.find((g) => g.id === "grp2").type, "private");
 });
 
 test("admin groups: discovery pagination does not skip or duplicate", async () => {
@@ -400,16 +401,49 @@ test("admin groups: detail works on a dissolved group", async () => {
   assert.equal(res.body.group.status, "dissolved");
 });
 
-test("admin groups: detail 404 for missing and non-public groups", async () => {
+test("admin groups: detail 404 for missing groups", async () => {
   const missing = makeDb({ groups: [groupFixture()] });
   const missRes = response();
   await adminGetGroup({ user: adminUser(), params: { groupId: "ghost" } }, missRes, missing);
   assert.equal(missRes.statusCode, 404, "missing group must 404");
+});
 
-  const nonPublic = makeDb({ groups: [groupFixture({ id: "grp2", type: "private" })] });
-  const privRes = response();
-  await adminGetGroup({ user: adminUser(), params: { groupId: "grp2" } }, privRes, nonPublic);
-  assert.equal(privRes.statusCode, 404, "non-public group must 404 for admins");
+test("admin groups: moderation covers non-public groups end-to-end without codes", async () => {
+  const db = makeDb({
+    groups: [groupFixture({ id: "grp1", type: "invite_only", inviteCode: "secretcode123" })],
+    members: [memberFixture({ userId: "cus1" }), memberFixture({ userId: "cus2" })],
+    users: [userRow({ id: "cus2", name: "Bob" })],
+    messages: [messageFixture({ id: "msg1", senderId: "cus2" })],
+  });
+
+  const feed = response();
+  await adminListGroupMessages({ user: adminUser(), params: { groupId: "grp1" }, query: {} }, feed, db);
+  assert.equal(feed.statusCode, 200);
+  assert.equal(feed.body.messages.length, 1);
+  assert.ok(!JSON.stringify(feed.body).includes("secretcode123"), "admin message payload must be code-free");
+
+  const remove = response();
+  await adminRemoveGroupMember({ user: adminUser(), params: { groupId: "grp1", userId: "cus2" } }, remove, db);
+  assert.equal(remove.statusCode, 200);
+
+  const del = response();
+  await adminDeleteGroupMessage({ user: adminUser(), params: { groupId: "grp1", messageId: "msg1" } }, del, db);
+  assert.equal(del.statusCode, 200);
+
+  const dissolve = response();
+  await adminDissolveGroup({ user: adminUser(), params: { groupId: "grp1" } }, dissolve, db);
+  assert.equal(dissolve.statusCode, 200);
+});
+
+test("admin groups: detail works on non-public groups without ever returning the code", async () => {
+  for (const type of ["private", "invite_only"]) {
+    const nonPublic = makeDb({ groups: [groupFixture({ id: "grp2", type, inviteCode: "secretcode123" })] });
+    const privRes = response();
+    await adminGetGroup({ user: adminUser(), params: { groupId: "grp2" } }, privRes, nonPublic);
+    assert.equal(privRes.statusCode, 200, `${type} group must be visible to admins`);
+    assert.equal(privRes.body.group.type, type);
+    assert.ok(!JSON.stringify(privRes.body).includes("secretcode123"), "admin detail must never expose the invite code");
+  }
 });
 
 test("admin groups: detail requires a groupId param", async () => {

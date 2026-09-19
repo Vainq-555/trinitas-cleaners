@@ -298,13 +298,16 @@ model CommunityProfile {
   @@index([displayName])
 }
 
-// "public" | "private" | "invite_only" — string-validated app-side (G1b+)
+// "public" | "private" | "invite_only" — string-validated app-side (G1b+/G1f)
 model Group {
   id          String   @id @default(cuid())
   ownerId     String
   name        String
   description String?
   type        String   @default("public")
+  // One owner-issued invite code per non-public group (nullable, unique).
+  // The owner alone can read/rotate/disable it via the G1f endpoints.
+  inviteCode  String?  @unique
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   dissolvedAt DateTime?

@@ -23,7 +23,11 @@ import {
   validateGroupName,
   validateGroupDescription,
   validateGroupMessage,
+  validateInviteCode,
   ownerControls,
+  isNonPublicGroup,
+  requiresInvite,
+  groupTypeLabel,
   memberName,
   memberAvatarUrl,
   isOnlineMember,
@@ -90,6 +94,14 @@ export default function GroupDetailPage({ params }) {
   const [busy, setBusy] = useState(null);
   const [confirm, setConfirm] = useState(null);
 
+  const [inviteCode, setInviteCode] = useState(null);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState("");
+  const [inviteNotice, setInviteNotice] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState("");
+
   const bottomRef = useRef(null);
 
   const fetchRoster = async ({ silent } = {}) => {
@@ -136,6 +148,13 @@ export default function GroupDetailPage({ params }) {
     load();
   }, [groupId]);
 
+  useEffect(() => {
+    if (!loading && group && ownerControls(user?.id, group.owner?.id) && isNonPublicGroup(group)) {
+      loadInviteCode();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId, loading, group?.owner?.id, group?.type]);
+
   const join = async () => {
     if (busy || !group) return;
     setBusy("join");
@@ -175,6 +194,83 @@ export default function GroupDetailPage({ params }) {
       else setActionError(err.message || "Couldn't leave the group. Please try again.");
     } finally {
       setBusy(null);
+    }
+  };
+
+  const joinWithCode = async (e) => {
+    e.preventDefault();
+    if (busy || !group) return;
+    const codeProblem = validateInviteCode(joinCode);
+    if (codeProblem) {
+      setJoinError(codeProblem);
+      return;
+    }
+    setBusy("join-code");
+    setActionError("");
+    setJoinError("");
+    try {
+      await api("/community/groups/join-with-code", { method: "POST", body: { code: joinCode.trim() } });
+      setJoinCode("");
+      setGroup((prev) => (prev ? { ...prev, joined: true } : prev));
+      await loadExtra();
+    } catch (err) {
+      if (isBlockedError(err)) setBlocked(true);
+      else if (isRateLimitError(err)) setActionError("You've changed your group memberships too quickly. Please wait a minute and try again.");
+      else if (err.status === 404) setJoinError("That invite code didn't match an open group. Double-check it and try again.");
+      else if (err.status === 401) setActionError("Your session has expired. Please sign in again.");
+      else setJoinError(err.message || "Couldn't join with that code. Please try again.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const loadInviteCode = async () => {
+    if (inviteLoading) return;
+    setInviteLoading(true);
+    setInviteError("");
+    setInviteNotice("");
+    try {
+      const data = await api(`/community/groups/${encodeURIComponent(groupId)}/invite-code`);
+      setInviteCode(data.inviteCode ?? null);
+    } catch (err) {
+      if (err.status === 404) setNotFound(true);
+      else setInviteError(err.message || "Couldn't load the invite code.");
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const generateInviteCode = async () => {
+    if (inviteBusy) return;
+    setInviteBusy(true);
+    setInviteError("");
+    setInviteNotice("");
+    try {
+      const data = await api(`/community/groups/${encodeURIComponent(groupId)}/invite-code`, { method: "POST" });
+      setInviteCode(data.inviteCode ?? null);
+      setInviteNotice("A new code was issued — the previous code no longer works.");
+    } catch (err) {
+      if (err.status === 404) setNotFound(true);
+      else setInviteError(err.message || "Couldn't update the invite code.");
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
+  const disableInviteCode = async () => {
+    if (inviteBusy) return;
+    setInviteBusy(true);
+    setInviteError("");
+    setInviteNotice("");
+    try {
+      const data = await api(`/community/groups/${encodeURIComponent(groupId)}/invite-code`, { method: "DELETE" });
+      setInviteCode(data.inviteCode ?? null);
+      setInviteNotice("Invite code disabled. New joins stay closed until you generate a new code.");
+    } catch (err) {
+      if (err.status === 404) setNotFound(true);
+      else setInviteError(err.message || "Couldn't disable the invite code.");
+    } finally {
+      setInviteBusy(false);
     }
   };
 
@@ -554,6 +650,11 @@ export default function GroupDetailPage({ params }) {
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2.5">
                   <h2 className="text-xl font-extrabold tracking-tight text-ink">{group.name}</h2>
+                  {requiresInvite(group) && (
+                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                      By invitation only
+                    </span>
+                  )}
                   {isJoined && (
                     <span className="rounded-full bg-clean-light px-2.5 py-0.5 text-xs font-semibold text-clean">
                       Joined
@@ -583,7 +684,24 @@ export default function GroupDetailPage({ params }) {
                 </div>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
-                {!isJoined && (
+                {!isJoined && isNonPublicGroup(group) && (
+                  <form className="flex items-center gap-2" onSubmit={joinWithCode}>
+                    <label htmlFor="join-code" className="sr-only">Invite code</label>
+                    <input
+                      id="join-code"
+                      className="input w-44"
+                      placeholder="Enter invite code"
+                      value={joinCode}
+                      onChange={(e) => { setJoinCode(e.target.value); if (joinError) setJoinError(""); }}
+                      disabled={Boolean(busy)}
+                      autoComplete="off"
+                    />
+                    <button className="btn btn-primary" disabled={Boolean(busy) || blocked || !joinCode.trim()}>
+                      {busy === "join-code" ? "Joining…" : "Join with code"}
+                    </button>
+                  </form>
+                )}
+                {!isJoined && !isNonPublicGroup(group) && (
                   <button className="btn btn-primary" onClick={join} disabled={Boolean(busy) || blocked}>
                     {busy === "join" ? "Joining…" : "Join group"}
                   </button>
@@ -606,7 +724,57 @@ export default function GroupDetailPage({ params }) {
               </div>
             </div>
             {actionError && <p className="form-error mt-3" aria-live="polite">{actionError}</p>}
+            {joinError && <p className="form-error mt-3" aria-live="polite">{joinError}</p>}
           </div>
+
+          {/* Owner-only invite code panel (private & invite_only groups) */}
+          {isOwner && isNonPublicGroup(group) && (
+            <div className="card card-pad mb-6">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="font-bold text-ink">Invite code</h3>
+                  <p className="mt-1 text-sm text-muted">
+                    Share this code with the customers you want to invite. It opens {groupTypeLabel(group.type)} joins.
+                  </p>
+                  {inviteLoading ? (
+                    <p className="mt-2 text-sm text-muted">Loading code…</p>
+                  ) : inviteCode ? (
+                    <div className="mt-3">
+                      <code className="rounded-lg border border-line bg-slate-50 px-3 py-1.5 font-mono text-base font-semibold tracking-wide text-ink">
+                        {inviteCode}
+                      </code>
+                      <p className="mt-2 text-xs text-muted">
+                        Anyone with this code can join. Rotate it to revoke access, or disable it to close new joins.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-muted">
+                      No invite code yet — generate one to start inviting customers.
+                    </p>
+                  )}
+                  {inviteNotice && <p className="mt-2 text-xs font-semibold text-clean" role="status">{inviteNotice}</p>}
+                  {inviteError && <p className="form-error mt-2">{inviteError}</p>}
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {!inviteCode && !inviteLoading && (
+                    <button className="btn btn-primary btn-sm" onClick={generateInviteCode} disabled={inviteBusy}>
+                      {inviteBusy ? "Generating…" : "Generate code"}
+                    </button>
+                  )}
+                  {inviteCode && !inviteLoading && (
+                    <>
+                      <button className="btn btn-outline btn-sm" onClick={generateInviteCode} disabled={inviteBusy}>
+                        {inviteBusy ? "Rotating…" : "Rotate code"}
+                      </button>
+                      <button className="btn btn-danger btn-sm" onClick={disableInviteCode} disabled={inviteBusy}>
+                        Disable
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {blocked && (
             <div role="status" className="mb-6 border-b border-amber-200 bg-warnbg px-5 py-3 text-sm text-amber-700">

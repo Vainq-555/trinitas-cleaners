@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import prisma from "../utils/prisma.js";
 import { badRequest } from "../utils/validators.js";
 import { createRateLimiter } from "../utils/rateLimit.js";
@@ -13,9 +14,14 @@ const wrap = (fn) => (req, res, next, db = prisma) => {
   return Promise.resolve(fn(req, res, next, db)).catch(next);
 };
 
-// G1b supports public groups only. private/invite_only are validated app-side
-// (see the audit roadmap); the DB column stays a free string.
+// Group types are string-validated app-side against this closed set (the DB
+// column stays a free string). public is the G1b default; private (hidden from
+// discovery, join by code) and invite_only (visible with a code-gated join) are
+// G1f. A group's type is chosen at creation and is immutable afterward.
 export const GROUP_TYPE_PUBLIC = "public";
+export const GROUP_TYPE_PRIVATE = "private";
+export const GROUP_TYPE_INVITE_ONLY = "invite_only";
+export const GROUP_TYPES = [GROUP_TYPE_PUBLIC, GROUP_TYPE_PRIVATE, GROUP_TYPE_INVITE_ONLY];
 export const GROUP_NAME_MAX = 100;
 export const GROUP_DESC_MAX = 500;
 export const GROUP_LIMIT_DEFAULT = 50;
@@ -25,6 +31,7 @@ export const GROUP_MESSAGE_MAX = 1000;
 const BLOCKED_ERROR = "You are blocked from community groups";
 const TOO_MANY_ERROR = "Too many requests. Please try again later.";
 const NOT_FOUND_ERROR = "Group not found";
+const INVITE_CODE_TYPE_ERROR = "Invite codes only apply to private and invite_only groups";
 const OWNER_LEAVE_ERROR =
   "Owners cannot leave a group. Transfer ownership or dissolve the group first.";
 const REMOVE_SELF_ERROR =
@@ -82,8 +89,10 @@ function parseGroupLimit(req) {
 // user ids are never trusted for authorization; groupId always from req.params.
 
 // Safe shapes. Never a raw Prisma Group/User row: no ownerId, no dissolvedAt,
-// no email/phone/address/status/lastActiveAt/communityBlockedAt and no owner
-// beyond the public identity reused by the Community feed (id + name).
+// no inviteCode, no email/phone/address/status/lastActiveAt/communityBlockedAt
+// and no owner beyond the public identity reused by the Community feed
+// (id + name). requiresInvite is derived from the immutable type so the UI can
+// show the "By invitation only" gate without ever receiving the code itself.
 const ownerShape = (o) => ({ id: o?.id ?? null, name: o?.name ?? null });
 
 const groupShape = (g, memberCount, joined) => ({
@@ -91,6 +100,7 @@ const groupShape = (g, memberCount, joined) => ({
   name: g.name,
   description: g.description ?? null,
   type: g.type,
+  requiresInvite: g.type === GROUP_TYPE_INVITE_ONLY,
   createdAt: g.createdAt,
   updatedAt: g.updatedAt,
   memberCount,
@@ -142,7 +152,8 @@ const messageShape = (gm) => ({
 
 // Admin group shape: the public group identity plus the moderation state an
 // admin needs (dissolvedAt/status) and the owner's public identity. Never a raw
-// Group row and never owner/member account fields.
+// Group row, never owner/member account fields and never the invite code
+// (admins moderate all types through G1d but never receive customer codes).
 const adminGroupShape = (g, memberCount) => ({
   id: g.id,
   name: g.name,
@@ -167,9 +178,10 @@ const adminMessageShape = (gm) => ({
 
 // Fields the PATCH /update endpoint refuses to touch. id/createdAt/updatedAt
 // are system-managed; ownerId/type/dissolvedAt are immutable without dedicated
-// endpoints (transfer/dissolve), and private/invite_only types are a later
-// roadmap item, so `type` can never be set through update yet.
-const IMMUTABLE_GROUP_FIELDS = ["id", "ownerId", "type", "dissolvedAt", "createdAt", "updatedAt"];
+// endpoints (type is fixed at creation per G1f — there is no type-change
+// endpoint — while ownership changes by transfer and the lifecycle ends by
+// dissolve). inviteCode is managed only through the dedicated G1f endpoints.
+const IMMUTABLE_GROUP_FIELDS = ["id", "ownerId", "type", "inviteCode", "dissolvedAt", "createdAt", "updatedAt"];
 
 // Sender/profile include clauses use the same safe projection everywhere. The
 // Controller uses only senderShape on the results, so no sensitive field can
@@ -205,10 +217,26 @@ function groupParam(req, res) {
   return groupId;
 }
 
-// Active group = public AND not dissolved. Dissolved and non-public groups are
-// uniformly 404 for every customer endpoint, exactly like G1b.
+// Active group = not dissolved (any type). Non-public groups are only reachable
+// through the downstream member/owner gates: members read group resources via
+// requireActiveMember, while everyone else still gets the uniform 404.
 function fetchActiveGroup(db, groupId) {
-  return db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC, dissolvedAt: null } });
+  return db.group.findFirst({ where: { id: groupId, dissolvedAt: null } });
+}
+
+// Owner-scoped lookup for the owner-only management actions (update, remove
+// member, transfer, dissolve). Public groups stay visible to every caller so a
+// non-owner keeps getting the historical 403; private and invite_only groups
+// are only found for their OWNER, so a non-owner probing them gets the same 404
+// as a missing group — no existence oracle for non-public groups.
+function fetchOwnableGroup(db, groupId, ownerId) {
+  return db.group.findFirst({
+    where: {
+      id: groupId,
+      dissolvedAt: null,
+      OR: [{ type: GROUP_TYPE_PUBLIC }, { ownerId }],
+    },
+  });
 }
 
 async function isActiveMember(db, groupId, userId) {
@@ -226,10 +254,14 @@ async function requireActiveMember(req, res, db, groupId) {
 
 // ---- Customer side ----
 
-// GET /api/community/groups — discovery of public, non-dissolved groups only.
-// Cursor pagination (createdAt DESC, id DESC) with the same take = limit + 1
-// window as the Community feed. memberCount and joined are derived server-side
-// from real membership rows keyed by req.user.id — never from the query string.
+// GET /api/community/groups — discovery of public and invite_only groups that
+// are not dissolved. private groups are never listed (they are reachable only
+// by code once a member; before joining they don't appear anywhere). invite_only
+// groups list with a requiresInvite flag so the UI can show the code-gated join
+// without ever seeing the code. Cursor pagination (createdAt DESC, id DESC)
+// with the same take = limit + 1 window as the Community feed. memberCount and
+// joined are derived server-side from real membership rows keyed by req.user.id
+// — never from the query string.
 export const listGroups = wrap(async function listGroups(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.CUSTOMER) {
     return res.status(403).json({ error: "Only customers can view groups" });
@@ -241,7 +273,10 @@ export const listGroups = wrap(async function listGroups(req, res, next, db = pr
   }
 
   const before = req.query?.before;
-  const where = { type: GROUP_TYPE_PUBLIC, dissolvedAt: null };
+  const where = {
+    type: { in: [GROUP_TYPE_PUBLIC, GROUP_TYPE_INVITE_ONLY] },
+    dissolvedAt: null,
+  };
   if (before !== undefined && before !== null && before !== "") {
     const cursor = decodeCursor(before);
     if (!cursor) return badRequest(res, "before must be a valid cursor");
@@ -293,6 +328,11 @@ export const createGroup = wrap(async function createGroup(req, res, next, db = 
 
   const { name, description, type } = body;
 
+  const cleanType = typeof type === "string" ? type : null;
+  if (!GROUP_TYPES.includes(cleanType)) {
+    return badRequest(res, 'type must be "public", "private" or "invite_only"');
+  }
+
   if (typeof name !== "string" || !name.trim()) return badRequest(res, "name is required");
   const groupName = name.trim();
   if (groupName.length > GROUP_NAME_MAX) {
@@ -308,8 +348,6 @@ export const createGroup = wrap(async function createGroup(req, res, next, db = 
     }
   }
 
-  if (type !== GROUP_TYPE_PUBLIC) return badRequest(res, 'type must be "public"');
-
   if (req.user.communityBlockedAt) {
     return res.status(403).json({ error: BLOCKED_ERROR });
   }
@@ -321,7 +359,7 @@ export const createGroup = wrap(async function createGroup(req, res, next, db = 
 
   const group = await db.$transaction(async (tx) => {
     const g = await tx.group.create({
-      data: { ownerId: req.user.id, name: groupName, description: groupDescription, type: GROUP_TYPE_PUBLIC },
+      data: { ownerId: req.user.id, name: groupName, description: groupDescription, type: cleanType },
     });
     await tx.groupMember.create({ data: { groupId: g.id, userId: req.user.id } });
     return g;
@@ -335,8 +373,11 @@ export const createGroup = wrap(async function createGroup(req, res, next, db = 
   });
 });
 
-// GET /api/community/groups/:groupId — safe group detail. Nonexistent,
-// dissolved and non-public groups all behave as a uniform 404.
+// GET /api/community/groups/:groupId — safe group detail. Nonexistent and
+// dissolved groups behave as a uniform 404. public groups are readable by every
+// authenticated customer (existing behavior). private groups (never listed) and
+// invite_only groups are readable only by their members: a non-member gets the
+// same 404 as a missing group, so membership is never disclosed.
 export const getGroup = wrap(async function getGroup(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.CUSTOMER) {
     return res.status(403).json({ error: "Only customers can view groups" });
@@ -346,10 +387,14 @@ export const getGroup = wrap(async function getGroup(req, res, next, db = prisma
   if (typeof groupId !== "string" || !groupId) return badRequest(res, "groupId is required");
 
   const group = await db.group.findFirst({
-    where: { id: groupId, type: GROUP_TYPE_PUBLIC, dissolvedAt: null },
+    where: { id: groupId, dissolvedAt: null },
     include: { owner: { select: { id: true, name: true } } },
   });
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  if (group.type !== GROUP_TYPE_PUBLIC) {
+    if (await requireActiveMember(req, res, db, groupId)) return;
+  }
 
   const [members, myMemberships] = await Promise.all([
     db.groupMember.findMany({ where: { groupId } }),
@@ -362,7 +407,11 @@ export const getGroup = wrap(async function getGroup(req, res, next, db = prisma
 // POST /api/community/groups/:groupId/join — idempotent. The composite primary
 // key (groupId, userId) is the final duplicate guard; P2002 on create means we
 // were already a member and is treated as success. Blocked customers are
-// rejected before any membership work.
+// rejected before any membership work. public groups join freely (G1c). For
+// private and invite_only groups the body MUST carry the group's current invite
+// code; a missing or wrong code is the same uniform 404 as a missing group, so
+// no membership or group state is ever disclosed. (join-with-code, the new G1f
+// endpoint, is the discover-by-code path.)
 export const joinGroup = wrap(async function joinGroup(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.CUSTOMER) {
     return res.status(403).json({ error: "Only customers can join groups" });
@@ -375,8 +424,15 @@ export const joinGroup = wrap(async function joinGroup(req, res, next, db = pris
     return res.status(403).json({ error: BLOCKED_ERROR });
   }
 
-  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC, dissolvedAt: null } });
+  const group = await db.group.findFirst({ where: { id: groupId, dissolvedAt: null } });
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  if (group.type !== GROUP_TYPE_PUBLIC) {
+    const code = req.body?.code;
+    if (typeof code !== "string" || !group.inviteCode || code !== group.inviteCode) {
+      return res.status(404).json({ error: NOT_FOUND_ERROR });
+    }
+  }
 
   const key = `group:membership:${req.user.id}`;
   if (!groupMembershipLimiter.allow(key)) return res.status(429).json({ error: TOO_MANY_ERROR });
@@ -392,9 +448,11 @@ export const joinGroup = wrap(async function joinGroup(req, res, next, db = pris
 });
 
 // POST /api/community/groups/:groupId/leave — idempotent. The owner cannot
-// leave (transfer/dissolve are G1b+ and unimplemented). Blocked customers CAN
-// leave groups they belong to. P2025 on delete means we were not a member and
-// is treated as success.
+// leave (transfer/dissolve are the way out). Blocked customers CAN leave groups
+// they belong to. P2025 on delete means we were not a member and is treated as
+// success. Leaving is allowed on any active group type: a member of a private
+// or invite_only group can withdraw exactly like a public-group member, and a
+// non-member (already a member or not) gets the same idempotent success.
 export const leaveGroup = wrap(async function leaveGroup(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.CUSTOMER) {
     return res.status(403).json({ error: "Only customers can leave groups" });
@@ -403,7 +461,7 @@ export const leaveGroup = wrap(async function leaveGroup(req, res, next, db = pr
   const { groupId } = req.params;
   if (typeof groupId !== "string" || !groupId) return badRequest(res, "groupId is required");
 
-  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC, dissolvedAt: null } });
+  const group = await fetchActiveGroup(db, groupId);
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
   if (group.ownerId === req.user.id) {
@@ -636,7 +694,7 @@ export const updateGroup = wrap(async function updateGroup(req, res, next, db = 
     return badRequest(res, `The following fields cannot be changed: ${forbidden.join(", ")}`);
   }
 
-  const group = await fetchActiveGroup(db, groupId);
+  const group = await fetchOwnableGroup(db, groupId, req.user.id);
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
   if (group.ownerId !== req.user.id) {
@@ -688,7 +746,8 @@ export const updateGroup = wrap(async function updateGroup(req, res, next, db = 
 // DELETE /api/community/groups/:groupId/members/:userId — owner removes a
 // member. The owner cannot remove themselves (400; transfer or dissolve first).
 // Idempotent: removing a non-member is a success, mirroring leaveGroup. A
-// blocked owner may still manage the group.
+// blocked owner may still manage the group. Works for any active type the
+// caller owns (public, private or invite_only).
 export const removeGroupMember = wrap(async function removeGroupMember(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.CUSTOMER) {
     return res.status(403).json({ error: "Only customers can manage group members" });
@@ -700,7 +759,7 @@ export const removeGroupMember = wrap(async function removeGroupMember(req, res,
   const { userId } = req.params;
   if (typeof userId !== "string" || !userId.trim()) return badRequest(res, "userId is required");
 
-  const group = await fetchActiveGroup(db, groupId);
+  const group = await fetchOwnableGroup(db, groupId, req.user.id);
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
   if (group.ownerId !== req.user.id) {
@@ -724,7 +783,7 @@ export const removeGroupMember = wrap(async function removeGroupMember(req, res,
 // The target must be a customer who is an ACTIVE member and not blocked. The
 // previous owner stays a member (no membership change). The target is taken
 // from the body, never from any header/query. A blocked owner may still
-// transfer.
+// transfer. Works for any active type the caller owns.
 export const transferGroupOwner = wrap(async function transferGroupOwner(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.CUSTOMER) {
     return res.status(403).json({ error: "Only customers can transfer group ownership" });
@@ -741,7 +800,7 @@ export const transferGroupOwner = wrap(async function transferGroupOwner(req, re
   const { userId } = body;
   if (typeof userId !== "string" || !userId.trim()) return badRequest(res, "userId is required");
 
-  const group = await fetchActiveGroup(db, groupId);
+  const group = await fetchOwnableGroup(db, groupId, req.user.id);
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
   if (group.ownerId !== req.user.id) {
@@ -780,7 +839,7 @@ export const transferGroupOwner = wrap(async function transferGroupOwner(req, re
 // POST /api/community/groups/:groupId/dissolve — owner soft-publishes the end
 // of a group. No rows are deleted; dissolvedAt makes the group disappear from
 // every customer endpoint (404 thereafter), so a second dissolve is a 404. A
-// blocked owner may still dissolve.
+// blocked owner may still dissolve. Works for any active type the caller owns.
 export const dissolveGroup = wrap(async function dissolveGroup(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.CUSTOMER) {
     return res.status(403).json({ error: "Only customers can dissolve groups" });
@@ -789,7 +848,7 @@ export const dissolveGroup = wrap(async function dissolveGroup(req, res, next, d
   const groupId = groupParam(req, res);
   if (!groupId) return;
 
-  const group = await fetchActiveGroup(db, groupId);
+  const group = await fetchOwnableGroup(db, groupId, req.user.id);
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
   if (group.ownerId !== req.user.id) {
@@ -804,12 +863,149 @@ export const dissolveGroup = wrap(async function dissolveGroup(req, res, next, d
   res.json({ ok: true, groupId, dissolved: true });
 });
 
+// ---- G1f non-public groups: invite codes & join-by-code ----
+
+// 12-character URL-safe code from 9 random bytes (72 bits of entropy). Long
+// enough that guessing is infeasible, short enough to copy by hand. The code is
+// stored directly on the group row (nullable, unique) so join-by-code can
+// resolve a group from the code in one lookup. It never leaves the server
+// except through the owner-only invite-code endpoints below.
+function newInviteCode() {
+  return randomBytes(9).toString("base64url");
+}
+
+// GET /api/community/groups/:groupId/invite-code — owner-only read of the
+// group's invite code. private/invite_only groups only: requesting the code for
+// a public group is a 400 (nothing to hide — public groups never hold codes),
+// and any NON-OWNER (member or not) gets the same 404 as a missing group so the
+// code is never confirmed to exist. The code is never part of discovery,
+// detail, member, message or admin payloads — this dedicated endpoint is the
+// only channel.
+export const getInviteCode = wrap(async function getInviteCode(req, res, next, db = prisma) {
+  if (!req.user || req.user.role !== ROLES.CUSTOMER) {
+    return res.status(403).json({ error: "Only customers can view group invite codes" });
+  }
+
+  const groupId = groupParam(req, res);
+  if (!groupId) return;
+
+  const group = await db.group.findFirst({ where: { id: groupId, dissolvedAt: null } });
+  if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  if (group.type === GROUP_TYPE_PUBLIC) return badRequest(res, INVITE_CODE_TYPE_ERROR);
+  if (group.ownerId !== req.user.id) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  res.json({ groupId, inviteCode: group.inviteCode ?? null });
+});
+
+// POST /api/community/groups/:groupId/invite-code — generate a new code, or
+// rotate the existing one (the old code stops working immediately because
+// join-by-code matches the current stored value). Ownership checks mirror
+// getInviteCode. The membership budget is untouched: this is owner-only and its
+// own low-traffic operation.
+export const generateInviteCode = wrap(async function generateInviteCode(req, res, next, db = prisma) {
+  if (!req.user || req.user.role !== ROLES.CUSTOMER) {
+    return res.status(403).json({ error: "Only customers can manage group invite codes" });
+  }
+
+  const groupId = groupParam(req, res);
+  if (!groupId) return;
+
+  const group = await db.group.findFirst({ where: { id: groupId, dissolvedAt: null } });
+  if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  if (group.type === GROUP_TYPE_PUBLIC) return badRequest(res, INVITE_CODE_TYPE_ERROR);
+  if (group.ownerId !== req.user.id) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  const code = newInviteCode();
+  const updated = await db.group.update({ where: { id: groupId }, data: { inviteCode: code } });
+
+  res.json({ ok: true, groupId, inviteCode: updated.inviteCode });
+});
+
+// DELETE /api/community/groups/:groupId/invite-code — disable the code. The
+// stored code becomes null so join-by-code can no longer resolve the group;
+// current members keep their membership. Idempotent: disabling when no code
+// exists is a success. Ownership checks mirror getInviteCode.
+export const disableInviteCode = wrap(async function disableInviteCode(req, res, next, db = prisma) {
+  if (!req.user || req.user.role !== ROLES.CUSTOMER) {
+    return res.status(403).json({ error: "Only customers can manage group invite codes" });
+  }
+
+  const groupId = groupParam(req, res);
+  if (!groupId) return;
+
+  const group = await db.group.findFirst({ where: { id: groupId, dissolvedAt: null } });
+  if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  if (group.type === GROUP_TYPE_PUBLIC) return badRequest(res, INVITE_CODE_TYPE_ERROR);
+  if (group.ownerId !== req.user.id) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  await db.group.update({ where: { id: groupId }, data: { inviteCode: null } });
+
+  res.json({ ok: true, groupId, inviteCode: null });
+});
+
+// POST /api/community/groups/join-with-code — join a non-public group by its
+// invite code. The group is resolved FROM the code (never from a groupId), so
+// an unknown or disabled code returns the same 404 as a missing group. Blocked
+// customers are rejected before any lookup (no code probing). Membership
+// keying, idempotency (P2002) and the per-customer membership limiter are
+// shared with joinGroup. The response carries the joined group's public
+// identity so the UI can land the user without a second round-trip.
+export const joinGroupWithCode = wrap(async function joinGroupWithCode(req, res, next, db = prisma) {
+  if (!req.user || req.user.role !== ROLES.CUSTOMER) {
+    return res.status(403).json({ error: "Only customers can join groups" });
+  }
+
+  const body = req.body;
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return badRequest(res, "Request body must be a JSON object");
+  }
+
+  const { code } = body;
+  if (typeof code !== "string" || !code.trim()) return badRequest(res, "code is required");
+
+  if (req.user.communityBlockedAt) {
+    return res.status(403).json({ error: BLOCKED_ERROR });
+  }
+
+  const group = await db.group.findFirst({
+    where: {
+      inviteCode: code.trim(),
+      type: { in: [GROUP_TYPE_PRIVATE, GROUP_TYPE_INVITE_ONLY] },
+      dissolvedAt: null,
+    },
+  });
+  if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
+
+  const key = `group:membership:${req.user.id}`;
+  if (!groupMembershipLimiter.allow(key)) return res.status(429).json({ error: TOO_MANY_ERROR });
+
+  try {
+    await db.groupMember.create({ data: { groupId: group.id, userId: req.user.id } });
+  } catch (error) {
+    if (error.code !== "P2002") throw error;
+  }
+
+  groupMembershipLimiter.record(key);
+  res.json({
+    ok: true,
+    groupId: group.id,
+    joined: true,
+    group: { id: group.id, name: group.name, type: group.type },
+  });
+});
+
 // ---- Admin side ----
 
-// GET /api/admin/community/groups — admin discovery of public groups, active
-// and dissolved. Unlike the customer feed, dissolved groups stay visible with
-// status "dissolved" so admins can still moderate them. Same cursor window as
-// the customer discovery feed.
+// GET /api/admin/community/groups — admin discovery of all groups (public,
+// private and invite_only), active and dissolved. Unlike the customer feed,
+// dissolved groups stay visible with status "dissolved" so admins can still
+// moderate them, and non-public groups appear so admins can moderate them too.
+// Admins never see a group's invite code: adminGroupShape picks explicit fields
+// and there is no admin invite-code route. Same cursor window as the customer
+// discovery feed.
 export const adminListGroups = wrap(async function adminListGroups(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.ADMIN) {
     return res.status(403).json({ error: "Only admins can manage community groups" });
@@ -821,7 +1017,7 @@ export const adminListGroups = wrap(async function adminListGroups(req, res, nex
   }
 
   const before = req.query?.before;
-  const where = { type: GROUP_TYPE_PUBLIC };
+  const where = {};
   if (before !== undefined && before !== null && before !== "") {
     const cursor = decodeCursor(before);
     if (!cursor) return badRequest(res, "before must be a valid cursor");
@@ -853,8 +1049,9 @@ export const adminListGroups = wrap(async function adminListGroups(req, res, nex
   res.json({ items, hasMore, nextCursor });
 });
 
-// GET /api/admin/community/groups/:groupId — admin detail of any public group,
-// including dissolved ones (customers see a 404 for dissolved groups).
+// GET /api/admin/community/groups/:groupId — admin detail of any group
+// (public, private or invite_only), including dissolved ones (customers see a
+// 404 for dissolved groups and for non-public groups they don't belong to).
 export const adminGetGroup = wrap(async function adminGetGroup(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.ADMIN) {
     return res.status(403).json({ error: "Only admins can manage community groups" });
@@ -864,7 +1061,7 @@ export const adminGetGroup = wrap(async function adminGetGroup(req, res, next, d
   if (!groupId) return;
 
   const group = await db.group.findFirst({
-    where: { id: groupId, type: GROUP_TYPE_PUBLIC },
+    where: { id: groupId },
     include: { owner: { select: { id: true, name: true } } },
   });
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
@@ -874,9 +1071,9 @@ export const adminGetGroup = wrap(async function adminGetGroup(req, res, next, d
   res.json({ group: adminGroupShape(group, members.length) });
 });
 
-// GET /api/admin/community/groups/:groupId/members — admin roster for any
-// public group (active or dissolved). Same safe member serialization as the
-// customer roster.
+// GET /api/admin/community/groups/:groupId/members — admin roster for any group
+// (public, private or invite_only; active or dissolved). Same safe member
+// serialization as the customer roster.
 export const adminListGroupMembers = wrap(async function adminListGroupMembers(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.ADMIN) {
     return res.status(403).json({ error: "Only admins can manage community groups" });
@@ -890,7 +1087,7 @@ export const adminListGroupMembers = wrap(async function adminListGroupMembers(r
     return badRequest(res, `limit must be an integer from 1 to ${GROUP_LIMIT_MAX}`);
   }
 
-  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC } });
+  const group = await db.group.findFirst({ where: { id: groupId } });
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
   const where = { groupId };
@@ -917,9 +1114,10 @@ export const adminListGroupMembers = wrap(async function adminListGroupMembers(r
   res.json({ members: members.map(memberShape), hasMore, nextCursor });
 });
 
-// GET /api/admin/community/groups/:groupId/messages — admin feed for any public
-// group (active or dissolved). The customer-safe message shape is extended with
-// moderation attribution (deletedById/deletedAt) that only admins receive.
+// GET /api/admin/community/groups/:groupId/messages — admin feed for any group
+// (public, private or invite_only; active or dissolved). The customer-safe
+// message shape is extended with moderation attribution (deletedById/deletedAt)
+// that only admins receive.
 export const adminListGroupMessages = wrap(async function adminListGroupMessages(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.ADMIN) {
     return res.status(403).json({ error: "Only admins can manage community groups" });
@@ -933,7 +1131,7 @@ export const adminListGroupMessages = wrap(async function adminListGroupMessages
     return badRequest(res, `limit must be an integer from 1 to ${GROUP_LIMIT_MAX}`);
   }
 
-  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC } });
+  const group = await db.group.findFirst({ where: { id: groupId } });
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
   const where = { groupId };
@@ -961,9 +1159,9 @@ export const adminListGroupMessages = wrap(async function adminListGroupMessages
 });
 
 // DELETE /api/admin/community/groups/:groupId/members/:userId — admin removes a
-// member from a public group. Only the membership row is deleted (never any
-// message). The owner cannot be removed this way (400): ownership only moves by
-// transfer or ends by dissolve, both owner actions. Idempotent: removing a
+// member from any group (member cannot be the owner). Only the membership row
+// is deleted (never any message). The owner cannot be removed this way (400):
+// ownership only moves by transfer or ends by dissolve, both owner actions. Idempotent: removing a
 // non-member is a success. Body/query userId is never trusted.
 export const adminRemoveGroupMember = wrap(async function adminRemoveGroupMember(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.ADMIN) {
@@ -976,7 +1174,7 @@ export const adminRemoveGroupMember = wrap(async function adminRemoveGroupMember
   const { userId } = req.params;
   if (typeof userId !== "string" || !userId.trim()) return badRequest(res, "userId is required");
 
-  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC } });
+  const group = await db.group.findFirst({ where: { id: groupId } });
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
   if (userId === group.ownerId) {
@@ -1012,7 +1210,7 @@ export const adminDeleteGroupMessage = wrap(async function adminDeleteGroupMessa
   const { messageId } = req.params;
   if (typeof messageId !== "string" || !messageId) return badRequest(res, "messageId is required");
 
-  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC } });
+  const group = await db.group.findFirst({ where: { id: groupId } });
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
   const message = await db.groupMessage.findFirst({
@@ -1036,11 +1234,12 @@ export const adminDeleteGroupMessage = wrap(async function adminDeleteGroupMessa
   res.json({ ok: true, message: adminMessageShape(updated) });
 });
 
-// POST /api/admin/community/groups/:groupId/dissolve — admin ends a public
-// group. Same soft dissolve as the owner path: only dissolvedAt is set, all
-// rows are preserved and the group stays inspectable by admins. Idempotent — an
-// already-dissolved group returns ok:true (unlike the customer 404, because
-// admins can see dissolved groups). Nonexistent groups still 404.
+// POST /api/admin/community/groups/:groupId/dissolve — admin ends any group
+// (public, private or invite_only). Same soft dissolve as the owner path: only
+// dissolvedAt is set, all rows are preserved and the group stays inspectable by
+// admins. Idempotent — an already-dissolved group returns ok:true (unlike the
+// customer 404, because admins can see dissolved groups). Nonexistent groups
+// still 404.
 export const adminDissolveGroup = wrap(async function adminDissolveGroup(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.ADMIN) {
     return res.status(403).json({ error: "Only admins can manage community groups" });
@@ -1049,7 +1248,7 @@ export const adminDissolveGroup = wrap(async function adminDissolveGroup(req, re
   const groupId = groupParam(req, res);
   if (!groupId) return;
 
-  const group = await db.group.findFirst({ where: { id: groupId, type: GROUP_TYPE_PUBLIC } });
+  const group = await db.group.findFirst({ where: { id: groupId } });
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
   const key = `group:admin:${req.user.id}`;

@@ -83,6 +83,12 @@ router.delete("/community/groups/:groupId/members/:userId", authenticate, requir
 router.post("/community/groups/:groupId/transfer", authenticate, requireCustomer, groups.transferGroupOwner);
 router.post("/community/groups/:groupId/dissolve", authenticate, requireCustomer, groups.dissolveGroup);
 
+// G1f — non-public groups: owner invite codes + join-by-code.
+router.post("/community/groups/join-with-code", authenticate, requireCustomer, groups.joinGroupWithCode);
+router.get("/community/groups/:groupId/invite-code", authenticate, requireCustomer, groups.getInviteCode);
+router.post("/community/groups/:groupId/invite-code", authenticate, requireCustomer, groups.generateInviteCode);
+router.delete("/community/groups/:groupId/invite-code", authenticate, requireCustomer, groups.disableInviteCode);
+
 router.get("/profile", authenticate, requireCustomer, profiles.getOwnProfile);
 router.put("/profile", authenticate, requireCustomer, profiles.updateOwnProfile);
 router.get("/profile/:userId", authenticate, requireCustomer, profiles.getPublicProfile);

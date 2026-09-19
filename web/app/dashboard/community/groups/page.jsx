@@ -13,10 +13,15 @@ import {
   GROUPS_LIMIT_DEFAULT,
   GROUP_NAME_MAX,
   GROUP_DESCRIPTION_MAX,
+  GROUP_TYPES,
+  GROUP_TYPE_PUBLIC,
   groupsQuery,
   mergeGroupMessages,
   validateGroupName,
   validateGroupDescription,
+  validateGroupType,
+  requiresInvite,
+  groupTypeLabel,
   isBlockedError,
   isRateLimitError,
 } from "@/lib/groups";
@@ -52,6 +57,7 @@ export default function GroupsListPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [groupType, setGroupType] = useState(GROUP_TYPE_PUBLIC);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createNotice, setCreateNotice] = useState("");
@@ -102,6 +108,11 @@ export default function GroupsListPage() {
     if (createError) setCreateError("");
   };
 
+  const onTypeChange = (value) => {
+    setGroupType(value);
+    if (createError) setCreateError("");
+  };
+
   const create = async (e) => {
     e.preventDefault();
     if (creating) return;
@@ -117,6 +128,12 @@ export default function GroupsListPage() {
       setCreateNotice("");
       return;
     }
+    const typeProblem = validateGroupType(groupType);
+    if (typeProblem) {
+      setCreateError(typeProblem);
+      setCreateNotice("");
+      return;
+    }
     setCreating(true);
     setCreateError("");
     setCreateNotice("");
@@ -125,7 +142,7 @@ export default function GroupsListPage() {
       const trimmedDesc = description.trim() || null;
       const data = await api("/community/groups", {
         method: "POST",
-        body: { name: trimmedName, description: trimmedDesc, type: "public" },
+        body: { name: trimmedName, description: trimmedDesc, type: groupType },
       });
       router.push(`/dashboard/community/groups/${encodeURIComponent(data.group.id)}`);
     } catch (err) {
@@ -186,6 +203,27 @@ export default function GroupsListPage() {
               />
               <p className="mt-1 text-right text-xs text-muted">{description.length}/{GROUP_DESCRIPTION_MAX}</p>
             </div>
+            <div>
+              <label htmlFor="group-type" className="mb-1 block text-xs font-semibold text-ink">Who can join?</label>
+              <select
+                id="group-type"
+                className="input w-full"
+                value={groupType}
+                onChange={(e) => onTypeChange(e.target.value)}
+                disabled={creating}
+              >
+                {GROUP_TYPES.map((value) => (
+                  <option key={value} value={value}>{groupTypeLabel(value)}</option>
+                ))}
+              </select>
+              {groupType !== GROUP_TYPE_PUBLIC && (
+                <p className="mt-1 text-xs text-muted">
+                  {groupType === "private"
+                    ? "Hidden from public discovery — only customers you share an invite code with can join."
+                    : "Shown in discovery with an invitation badge — joining still requires the invite code you share."}
+                </p>
+              )}
+            </div>
             <div className="text-right" aria-live="polite">
               {createNotice && <p className="form-error mb-1">{createNotice}</p>}
               {createError && !createNotice && <p className="form-error mb-1">{createError}</p>}
@@ -196,7 +234,7 @@ export default function GroupsListPage() {
           </form>
         ) : (
           <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-muted">Start a new public group and invite other customers by name.</p>
+            <p className="text-sm text-muted">Start a group — public, private, or by invitation only.</p>
             <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>
               <Plus size={16} /> Create a group
             </button>
@@ -231,6 +269,11 @@ export default function GroupsListPage() {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-bold text-ink">{g.name}</div>
+                  {requiresInvite(g) && (
+                    <span className="mt-1 mr-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                      By invitation only
+                    </span>
+                  )}
                   {g.joined && (
                     <span className="mt-1 inline-block rounded-full bg-clean-light px-2 py-0.5 text-[11px] font-semibold text-clean">
                       Joined

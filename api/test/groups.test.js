@@ -21,10 +21,17 @@ import {
   removeGroupMember,
   transferGroupOwner,
   dissolveGroup,
+  getInviteCode,
+  generateInviteCode,
+  disableInviteCode,
+  joinGroupWithCode,
   GROUP_DESC_MAX,
   GROUP_MESSAGE_MAX,
   GROUP_NAME_MAX,
+  GROUP_TYPES,
   GROUP_TYPE_PUBLIC,
+  GROUP_TYPE_PRIVATE,
+  GROUP_TYPE_INVITE_ONLY,
 } from "../src/controllers/groups.js";
 
 const response = () => ({
@@ -465,16 +472,50 @@ test("create: description over 500 characters is rejected with 400", async () =>
 test("create: invalid type values are rejected with 400", async () => {
   groupCreateLimiter._reset();
   const db = makeDb();
-  for (const type of ["private", "invite_only", "gossip", "", 123, null]) {
+  for (const type of ["gossip", "PUBLIC", "public ", "", 123, null, undefined]) {
     const res = response();
     await createGroup({ user: userFixture(), body: { name: "X", type } }, res, db);
     assert.equal(res.statusCode, 400, `type=${JSON.stringify(type)} should be rejected`);
-    assert.equal(res.body.error, 'type must be "public"');
+    assert.equal(res.body.error, 'type must be "public", "private" or "invite_only"');
   }
+  assert.equal((await db.group.findMany({})).length, 0);
 });
 
-test("create: only the exact accepted constant is a valid type", () => {
+test("create: the accepted type constants are public, private and invite_only", () => {
   assert.equal(GROUP_TYPE_PUBLIC, "public");
+  assert.equal(GROUP_TYPE_PRIVATE, "private");
+  assert.equal(GROUP_TYPE_INVITE_ONLY, "invite_only");
+  assert.deepEqual(GROUP_TYPES, ["public", "private", "invite_only"]);
+});
+
+test("create: a private group succeeds and the creator is owner + first member", async () => {
+  groupCreateLimiter._reset();
+  const db = makeDb();
+  const res = response();
+  await createGroup({ user: userFixture(), body: { name: "Secret Circle", type: "private" } }, res, db);
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.group.type, "private");
+  assert.equal(res.body.group.requiresInvite, false);
+  assert.equal(res.body.group.joined, true);
+  assert.equal(res.body.group.memberCount, 1);
+  assert.equal(res.body.group.inviteCode, undefined, "the code is never returned on create");
+
+  const [group] = await db.group.findMany({});
+  assert.equal(group.type, "private");
+  const members = await db.groupMember.findMany({});
+  assert.equal(members.length, 1);
+  assert.equal(members[0].userId, "cus1");
+});
+
+test("create: an invite_only group succeeds and is flagged as invite-gated", async () => {
+  groupCreateLimiter._reset();
+  const db = makeDb();
+  const res = response();
+  await createGroup({ user: userFixture(), body: { name: "Invite Club", type: "invite_only" } }, res, db);
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.group.type, "invite_only");
+  assert.equal(res.body.group.requiresInvite, true);
+  assert.equal((await db.group.findMany({}))[0].type, "invite_only");
 });
 
 test("create: malformed or non-object bodies are rejected with 400", async () => {
@@ -520,7 +561,7 @@ test("create: group and member are created atomically (rollback on member failur
 
 // -------------------- Discovery --------------------
 
-test("discovery: only public, non-dissolved groups appear", async () => {
+test("discovery: public and invite_only groups appear, private and dissolved do not", async () => {
   const db = makeDb({
     groups: [
       groupFixture({ id: "g1", name: "public one" }),
@@ -532,7 +573,12 @@ test("discovery: only public, non-dissolved groups appear", async () => {
   const res = response();
   await listGroups({ user: userFixture(), query: {} }, res, db);
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body.items.map((g) => g.id), ["g1"]);
+  // Same createdAt for all fixtures, so id DESC wins: g4 (invite_only) then g1 (public).
+  assert.deepEqual(res.body.items.map((g) => g.id), ["g4", "g1"]);
+  assert.equal(res.body.items.find((g) => g.id === "g4").requiresInvite, true, "invite_only groups are flagged for the UI");
+  assert.equal(res.body.items.find((g) => g.id === "g1").requiresInvite, false);
+  const payload = JSON.stringify(res.body);
+  assert.ok(!payload.toLowerCase().includes("invitecode"), "the invite code must never leak into discovery");
 });
 
 test("discovery: default limit is 50 and returns hasMore/nextCursor correctly", async () => {
@@ -688,6 +734,406 @@ test("discovery: sensitive User fields are never leaked", async () => {
   const payload = JSON.stringify(res.body);
   for (const forbidden of ["email", "phone", "address", "password", "status", "lastActiveAt", "secret", "credential"]) {
     assert.ok(!payload.toLowerCase().includes(forbidden.toLowerCase()), `list payload must not contain ${forbidden}`);
+  }
+});
+
+// -------------------- G1f: non-public groups & invite codes --------------------
+
+test("G1f: a member of a private group sees its detail with offers but no code", async () => {
+  const db = makeDb({
+    groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })],
+    members: [memberFixture(), memberFixture({ userId: "cus2" })],
+  });
+  const res = response();
+  await getGroup({ user: userFixture(), params: { groupId: "grp1" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.group.type, "private");
+  assert.equal(res.body.group.requiresInvite, false);
+  const payload = JSON.stringify(res.body);
+  assert.ok(!payload.includes("secretcode123"), "the invite code must never appear in detail");
+});
+
+test("G1f: a member of an invite_only group sees its detail flagged invite-gated", async () => {
+  const db = makeDb({
+    groups: [groupFixture({ type: "invite_only", inviteCode: "secretcode123" })],
+    members: [memberFixture()],
+  });
+  const res = response();
+  await getGroup({ user: userFixture(), params: { groupId: "grp1" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.group.type, "invite_only");
+  assert.equal(res.body.group.requiresInvite, true);
+});
+
+test("G1f: private and invite_only details are a uniform 404 for non-members", async () => {
+  for (const type of ["private", "invite_only"]) {
+    const db = makeDb({ groups: [groupFixture({ type, inviteCode: "secretcode123" })] });
+    const res = response();
+    await getGroup({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" } }, res, db);
+    assert.equal(res.statusCode, 404, `${type} must hide from non-members`);
+    assert.equal(res.body.error, "Group not found");
+  }
+});
+
+test("G1f: a private group joins by its exact invite code", async () => {
+  groupMembershipLimiter._reset();
+  const db = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })] });
+  const res = response();
+  await joinGroup({ user: userFixture(), params: { groupId: "grp1" }, body: { code: "secretcode123" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+  const members = await db.groupMember.findMany({});
+  assert.equal(members.length, 1);
+  assert.equal(members[0].userId, "cus1");
+});
+
+test("G1f: a wrong or missing code for a non-public group is a uniform 404", async () => {
+  groupMembershipLimiter._reset();
+  for (const body of [{ code: "wrong-code" }, {}, null]) {
+    const db = makeDb({ groups: [groupFixture({ type: "invite_only", inviteCode: "secretcode123" })] });
+    const res = response();
+    await joinGroup({ user: userFixture(), params: { groupId: "grp1" }, body }, res, db);
+    assert.equal(res.statusCode, 404, "wrong/missing code must behave as a missing group");
+    assert.equal((await db.groupMember.findMany({})).length, 0);
+  }
+});
+
+test("G1f: a non-public group with no code issued yet cannot be joined by path", async () => {
+  groupMembershipLimiter._reset();
+  const db = makeDb({ groups: [groupFixture({ type: "private" })] });
+  const res = response();
+  await joinGroup({ user: userFixture(), params: { groupId: "grp1" }, body: { code: "secretcode123" } }, res, db);
+  assert.equal(res.statusCode, 404, "no stored code means no join is possible");
+});
+
+test("G1f: the owner of a non-public group cannot leave (400)", async () => {
+  const db = makeDb({ groups: [groupFixture({ type: "invite_only" })], members: [memberFixture()] });
+  const res = response();
+  await leaveGroup({ user: userFixture(), params: { groupId: "grp1" } }, res, db);
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.error, /[Tt]ransfer ownership or dissolve/);
+});
+
+test("G1f: a non-member can leave a non-public group idempotently", async () => {
+  groupMembershipLimiter._reset();
+  const db = makeDb({ groups: [groupFixture({ type: "private" })], members: [memberFixture({ userId: "cus2" })] });
+  const res = response();
+  await leaveGroup({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  const members = await db.groupMember.findMany({});
+  assert.equal(members.length, 1, "cus2's membership must remain");
+});
+
+test("G1f: a member of an invite_only group reads the message feed", async () => {
+  const db = makeDb({
+    groups: [groupFixture({ type: "invite_only" })],
+    members: [memberFixture()],
+    users: [userRow({ id: "cus1" })],
+    messages: [messageFixture({ id: "msg1" })],
+  });
+  const res = response();
+  await listGroupMessages({ user: userFixture(), params: { groupId: "grp1" }, query: {} }, res, db);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.messages.map((m) => m.id), ["msg1"]);
+});
+
+test("G1f: a non-member cannot read or write messages of a non-public group (404)", async () => {
+  const db = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })] });
+  const roster = response();
+  await listGroupMembers({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" }, query: {} }, roster, db);
+  assert.equal(roster.statusCode, 404);
+  const feed = response();
+  await listGroupMessages({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" }, query: {} }, feed, db);
+  assert.equal(feed.statusCode, 404);
+});
+
+test("G1f: a member of a private group can send a message", async () => {
+  groupMessagePerGroupLimiter._reset();
+  groupMessagePerCustomerLimiter._reset();
+  const db = makeDb({
+    groups: [groupFixture({ type: "private" })],
+    members: [memberFixture()],
+  });
+  const res = response();
+  await sendGroupMessage({ user: userFixture(), params: { groupId: "grp1" }, body: { content: "inside" } }, res, db);
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.message.content, "inside");
+});
+
+test("G1f: a member of an invite_only group can delete their own message", async () => {
+  const db = makeDb({
+    groups: [groupFixture({ type: "invite_only" })],
+    members: [memberFixture()],
+    messages: [messageFixture({ senderId: "cus1" })],
+  });
+  const res = response();
+  await deleteGroupMessage({ user: userFixture(), params: { groupId: "grp1", messageId: "msg1" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.message.deleted, true);
+});
+
+test("G1f: the owner can update, remove from, transfer and dissolve their own non-public group", async () => {
+  const updater = makeDb({ groups: [groupFixture({ type: "invite_only" })], members: [memberFixture(), memberFixture({ userId: "cus2" })], users: [userRow({ id: "cus2", name: "Bob" })] });
+  const up = response();
+  await updateGroup({ user: userFixture(), params: { groupId: "grp1" }, body: { name: "Renamed Private" } }, up, updater);
+  assert.equal(up.statusCode, 200);
+  assert.equal(up.body.group.name, "Renamed Private");
+
+  const remover = makeDb({ groups: [groupFixture({ type: "private" })], members: [memberFixture(), memberFixture({ userId: "cus2" })] });
+  const rm = response();
+  await removeGroupMember({ user: userFixture(), params: { groupId: "grp1", userId: "cus2" } }, rm, remover);
+  assert.equal(rm.statusCode, 200);
+  assert.equal((await remover.groupMember.findMany({})).length, 1);
+
+  const transferrer = makeDb({ groups: [groupFixture({ type: "invite_only" })], members: [memberFixture(), memberFixture({ userId: "cus2" })], users: [userRow({ id: "cus2", name: "Bob" })] });
+  const tr = response();
+  await transferGroupOwner({ user: userFixture(), params: { groupId: "grp1" }, body: { userId: "cus2" } }, tr, transferrer);
+  assert.equal(tr.statusCode, 200);
+  assert.deepEqual(tr.body.group.owner, { id: "cus2", name: "Bob" });
+
+  const dissolver = makeDb({ groups: [groupFixture({ type: "private" })], members: [memberFixture()] });
+  const ds = response();
+  await dissolveGroup({ user: userFixture(), params: { groupId: "grp1" } }, ds, dissolver);
+  assert.equal(ds.statusCode, 200);
+  assert.equal(ds.body.dissolved, true);
+});
+
+test("G1f: non-owners probing a non-public group get a uniform 404, never 403", async () => {
+  // cus3 is an authenticated customer with no membership in a private group the
+  // owner cus1 runs. Every owner-scoped action and the code endpoints must look
+  // exactly like a missing group.
+  const db = makeDb({
+    groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })],
+    members: [memberFixture({ userId: "cus1" })],
+    users: [userRow({ id: "cus3", name: "Carol" })],
+  });
+  const user = userFixture({ id: "cus3", name: "Carol" });
+  const cases = [
+    ["updateGroup", { user, params: { groupId: "grp1" }, body: { name: "X" } }],
+    ["removeGroupMember", { user, params: { groupId: "grp1", userId: "cus2" } }],
+    ["transferGroupOwner", { user, params: { groupId: "grp1" }, body: { userId: "cus2" } }],
+    ["dissolveGroup", { user, params: { groupId: "grp1" } }],
+    ["getInviteCode", { user, params: { groupId: "grp1" } }],
+    ["generateInviteCode", { user, params: { groupId: "grp1" } }],
+    ["disableInviteCode", { user, params: { groupId: "grp1" } }],
+  ];
+  const handlers = {
+    updateGroup,
+    removeGroupMember,
+    transferGroupOwner,
+    dissolveGroup,
+    getInviteCode,
+    generateInviteCode,
+    disableInviteCode,
+  };
+  for (const [fn, req] of cases) {
+    const res = response();
+    await handlers[fn](req, res, db);
+    assert.equal(res.statusCode, 404, `${fn} must hide the non-public group from non-owners`);
+    assert.equal(res.body.error, "Group not found", `${fn} must not disclose the group`);
+  }
+});
+
+test("G1f: getInviteCode is owner-only and never returns a code to anyone else", async () => {
+  // Owner on a group with no code issued yet.
+  const noCode = makeDb({ groups: [groupFixture({ type: "private" })], members: [memberFixture()] });
+  const noRes = response();
+  await getInviteCode({ user: userFixture(), params: { groupId: "grp1" } }, noRes, noCode);
+  assert.equal(noRes.statusCode, 200);
+  assert.equal(noRes.body.inviteCode, null);
+
+  // Owner with a code issued.
+  const withCode = makeDb({ groups: [groupFixture({ type: "invite_only", inviteCode: "secretcode123" })], members: [memberFixture()] });
+  const okRes = response();
+  await getInviteCode({ user: userFixture(), params: { groupId: "grp1" } }, okRes, withCode);
+  assert.equal(okRes.statusCode, 200);
+  assert.equal(okRes.body.inviteCode, "secretcode123");
+
+  // A non-owner member must NOT see the code (uniform 404).
+  const memberDb = makeDb({ groups: [groupFixture({ type: "invite_only", inviteCode: "secretcode123" })], members: [memberFixture(), memberFixture({ userId: "cus2" })] });
+  const memberRes = response();
+  await getInviteCode({ user: userFixture({ id: "cus2", name: "Bob" }), params: { groupId: "grp1" } }, memberRes, memberDb);
+  assert.equal(memberRes.statusCode, 404);
+
+  // public groups never hold codes: 400.
+  const publicDb = makeDb({ groups: [groupFixture({ type: "public" })], members: [memberFixture()] });
+  const publicRes = response();
+  await getInviteCode({ user: userFixture(), params: { groupId: "grp1" } }, publicRes, publicDb);
+  assert.equal(publicRes.statusCode, 400);
+  assert.match(publicRes.body.error, /only apply to private and invite_only/);
+
+  // missing and dissolved groups are 404.
+  const ghost = makeDb();
+  const ghostRes = response();
+  await getInviteCode({ user: userFixture(), params: { groupId: "ghost" } }, ghostRes, ghost);
+  assert.equal(ghostRes.statusCode, 404);
+  const dissolved = makeDb({ groups: [groupFixture({ type: "private", dissolvedAt: t("2026-09-05T00:00:00Z") })] });
+  const dissolvedRes = response();
+  await getInviteCode({ user: userFixture(), params: { groupId: "grp1" } }, dissolvedRes, dissolved);
+  assert.equal(dissolvedRes.statusCode, 404);
+
+  // A blocked owner is still the owner and may view their own code.
+  const blockedDb = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })], members: [memberFixture()] });
+  const blockedRes = response();
+  await getInviteCode({ user: userFixture({ communityBlockedAt: t("2026-09-29T00:00:00Z") }), params: { groupId: "grp1" } }, blockedRes, blockedDb);
+  assert.equal(blockedRes.statusCode, 200);
+});
+
+test("G1f: generateInviteCode issues, rotates and persists a 12-character code", async () => {
+  const db = makeDb({ groups: [groupFixture({ type: "private" })], members: [memberFixture()] });
+  const first = response();
+  await generateInviteCode({ user: userFixture(), params: { groupId: "grp1" } }, first, db);
+  assert.equal(first.statusCode, 200);
+  assert.match(first.body.inviteCode, /^[A-Za-z0-9_-]{12}$/, "code is 12 URL-safe characters");
+  const stored1 = await db.group.findFirst({ where: { id: "grp1" } });
+  assert.equal(stored1.inviteCode, first.body.inviteCode);
+
+  // Rotation changes the code; the old one stops joining.
+  const rotated = response();
+  await generateInviteCode({ user: userFixture(), params: { groupId: "grp1" } }, rotated, db);
+  assert.equal(rotated.statusCode, 200);
+  assert.notEqual(rotated.body.inviteCode, first.body.inviteCode);
+  const stored2 = await db.group.findFirst({ where: { id: "grp1" } });
+  assert.equal(stored2.inviteCode, rotated.body.inviteCode);
+
+  const stale = response();
+  await joinGroup({ user: userFixture({ id: "cus2", name: "Bob" }), params: { groupId: "grp1" }, body: { code: first.body.inviteCode } }, stale, db);
+  assert.equal(stale.statusCode, 404, "the rotated-away code must no longer join");
+});
+
+test("G1f: disableInviteCode clears the code and blocks code-based joins", async () => {
+  const db = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })], members: [memberFixture()] });
+  const res = response();
+  await disableInviteCode({ user: userFixture(), params: { groupId: "grp1" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.inviteCode, null);
+  const stored = await db.group.findFirst({ where: { id: "grp1" } });
+  assert.equal(stored.inviteCode, null);
+
+  const again = response();
+  await disableInviteCode({ user: userFixture(), params: { groupId: "grp1" } }, again, db);
+  assert.equal(again.statusCode, 200, "disabling when already disabled is idempotent");
+
+  const viaCode = response();
+  await joinGroupWithCode({ user: userFixture({ id: "cus2", name: "Bob" }), body: { code: "secretcode123" } }, viaCode, db);
+  assert.equal(viaCode.statusCode, 404, "a disabled code can no longer join");
+});
+
+test("G1f: joinGroupWithCode resolves a private group from the code and joins", async () => {
+  groupMembershipLimiter._reset();
+  const db = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })], members: [memberFixture({ userId: "cus1" })] });
+  const res = response();
+  await joinGroupWithCode({ user: userFixture({ id: "cus2", name: "Bob" }), body: { code: "secretcode123" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.groupId, "grp1");
+  assert.deepEqual(res.body.group, { id: "grp1", name: "Cleaning Hacks", type: "private" });
+  const members = await db.groupMember.findMany({});
+  assert.deepEqual(members.map((m) => m.userId).sort(), ["cus1", "cus2"]);
+});
+
+test("G1f: joinGroupWithCode trims whitespace around the code", async () => {
+  groupMembershipLimiter._reset();
+  const db = makeDb({ groups: [groupFixture({ type: "invite_only", inviteCode: "secretcode123" })], members: [memberFixture({ userId: "cus1" })] });
+  const res = response();
+  await joinGroupWithCode({ user: userFixture({ id: "cus2", name: "Bob" }), body: { code: "  secretcode123  " } }, res, db);
+  assert.equal(res.statusCode, 200);
+});
+
+test("G1f: joinGroupWithCode is blocked for blocked customers (403, no membership)", async () => {
+  groupMembershipLimiter._reset();
+  const db = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })], members: [memberFixture({ userId: "cus1" })] });
+  const res = response();
+  await joinGroupWithCode(
+    { user: userFixture({ id: "cus3", name: "Carol", communityBlockedAt: t("2026-09-29T00:00:00Z") }), body: { code: "secretcode123" } },
+    res,
+    db,
+  );
+  assert.equal(res.statusCode, 403);
+  assert.equal((await db.groupMember.findMany({})).length, 1);
+});
+
+test("G1f: joinGroupWithCode returns 404 for unknown, disabled and dissolved codes", async () => {
+  groupMembershipLimiter._reset();
+  const unknown = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })] });
+  const unknownRes = response();
+  await joinGroupWithCode({ user: userFixture(), body: { code: "does-not-exist" } }, unknownRes, unknown);
+  assert.equal(unknownRes.statusCode, 404);
+
+  const disabled = makeDb({ groups: [groupFixture({ type: "private", inviteCode: null })] });
+  const disabledRes = response();
+  await joinGroupWithCode({ user: userFixture(), body: { code: "secretcode123" } }, disabledRes, disabled);
+  assert.equal(disabledRes.statusCode, 404);
+
+  const dissolved = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123", dissolvedAt: t("2026-09-05T00:00:00Z") })] });
+  const dissolvedRes = response();
+  await joinGroupWithCode({ user: userFixture(), body: { code: "secretcode123" } }, dissolvedRes, dissolved);
+  assert.equal(dissolvedRes.statusCode, 404);
+});
+
+test("G1f: joinGroupWithCode rejects malformed bodies with 400", async () => {
+  groupMembershipLimiter._reset();
+  const db = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })] });
+  for (const body of [null, [], "code", 42]) {
+    const res = response();
+    await joinGroupWithCode({ user: userFixture(), body }, res, db);
+    assert.equal(res.statusCode, 400, `body=${JSON.stringify(body)} should be rejected`);
+  }
+  for (const code of [undefined, "", "   "]) {
+    const res = response();
+    await joinGroupWithCode({ user: userFixture(), body: { code } }, res, db);
+    assert.equal(res.statusCode, 400, `code=${JSON.stringify(code)} should be rejected`);
+  }
+});
+
+test("G1f: repeated private joins with the same code are idempotent (P2002)", async () => {
+  groupMembershipLimiter._reset();
+  const db = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })], members: [memberFixture()] });
+  const first = response();
+  await joinGroup({ user: userFixture(), params: { groupId: "grp1" }, body: { code: "secretcode123" } }, first, db);
+  assert.equal(first.statusCode, 200);
+  const second = response();
+  await joinGroup({ user: userFixture(), params: { groupId: "grp1" }, body: { code: "secretcode123" } }, second, db);
+  assert.equal(second.statusCode, 200);
+  assert.equal((await db.groupMember.findMany({})).length, 1);
+});
+
+test("G1f: the invite code never appears in any customer or admin payload", async () => {
+  const CODE = "secretcode123";
+  const db = makeDb({
+    groups: [groupFixture({ type: "invite_only", inviteCode: CODE })],
+    members: [memberFixture()],
+    messages: [messageFixture()],
+  });
+  const payloads = [];
+  const capture = (label, res) => payloads.push([label, JSON.stringify(res.body)]);
+
+  const disc = response();
+  await listGroups({ user: userFixture(), query: {} }, disc, db);
+  capture("discovery", disc);
+
+  const detail = response();
+  await getGroup({ user: userFixture(), params: { groupId: "grp1" } }, detail, db);
+  capture("detail", detail);
+
+  const roster = response();
+  await listGroupMembers({ user: userFixture(), params: { groupId: "grp1" }, query: {} }, roster, db);
+  capture("members", roster);
+
+  const feed = response();
+  await listGroupMessages({ user: userFixture(), params: { groupId: "grp1" }, query: {} }, feed, db);
+  capture("messages", feed);
+
+  const sent = response();
+  await sendGroupMessage({ user: userFixture(), params: { groupId: "grp1" }, body: { content: "hi" } }, sent, db);
+  capture("send", sent);
+
+  const updated = response();
+  await updateGroup({ user: userFixture(), params: { groupId: "grp1" }, body: { name: "Renamed" } }, updated, db);
+  capture("update", updated);
+
+  for (const [label, payload] of payloads) {
+    assert.ok(!payload.includes(CODE), `${label} must never expose the invite code`);
   }
 });
 
@@ -914,11 +1360,21 @@ test("leave: dissolved group behaves as 404", async () => {
   assert.equal(res.statusCode, 404);
 });
 
-test("leave: non-public group behaves as 404", async () => {
-  const db = makeDb({ groups: [groupFixture({ type: "invite_only" })] });
+test("leave: the owner of a non-public group cannot leave (400)", async () => {
+  const db = makeDb({ groups: [groupFixture({ type: "private" })], members: [memberFixture({ userId: "cus1" })] });
   const res = response();
   await leaveGroup({ user: userFixture(), params: { groupId: "grp1" } }, res, db);
-  assert.equal(res.statusCode, 404);
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.error, /[Tt]ransfer ownership or dissolve/);
+});
+
+test("leave: a non-member leaving a private group is idempotent (200)", async () => {
+  groupMembershipLimiter._reset();
+  const db = makeDb({ groups: [groupFixture({ type: "private" })], members: [memberFixture({ userId: "cus2" })] });
+  const res = response();
+  await leaveGroup({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  assert.equal((await db.groupMember.findMany({})).length, 1);
 });
 
 test("leave: a userId in the body cannot make the leave happen for someone else", async () => {
@@ -1084,7 +1540,7 @@ test("identity: blocked status is always checked server-side from req.user", asy
   assert.equal(res.statusCode, 403);
 });
 
-test("routes: the thirteen G1b + G1c group routes are registered and Community V1 routes survive", () => {
+test("routes: the seventeen G1b + G1c + G1f group routes are registered and Community V1 routes survive", () => {
   const src = readFileSync(new URL("../src/routes/index.js", import.meta.url), "utf8");
   for (const path of [
     'router.get("/community/groups", authenticate, requireCustomer, groups.listGroups)',
@@ -1100,6 +1556,10 @@ test("routes: the thirteen G1b + G1c group routes are registered and Community V
     'router.delete("/community/groups/:groupId/members/:userId", authenticate, requireCustomer, groups.removeGroupMember)',
     'router.post("/community/groups/:groupId/transfer", authenticate, requireCustomer, groups.transferGroupOwner)',
     'router.post("/community/groups/:groupId/dissolve", authenticate, requireCustomer, groups.dissolveGroup)',
+    'router.post("/community/groups/join-with-code", authenticate, requireCustomer, groups.joinGroupWithCode)',
+    'router.get("/community/groups/:groupId/invite-code", authenticate, requireCustomer, groups.getInviteCode)',
+    'router.post("/community/groups/:groupId/invite-code", authenticate, requireCustomer, groups.generateInviteCode)',
+    'router.delete("/community/groups/:groupId/invite-code", authenticate, requireCustomer, groups.disableInviteCode)',
   ]) {
     assert.ok(src.includes(path), `route ${path} must be registered`);
   }
@@ -1129,6 +1589,10 @@ test("groups: an admin cannot use the G1c group endpoints (403)", async () => {
     ["removeGroupMember", { user: admin, params: { groupId: "grp1", userId: "cus2" } }],
     ["transferGroupOwner", { user: admin, params: { groupId: "grp1" }, body: { userId: "cus2" } }],
     ["dissolveGroup", { user: admin, params: { groupId: "grp1" } }],
+    ["getInviteCode", { user: admin, params: { groupId: "grp1" } }],
+    ["generateInviteCode", { user: admin, params: { groupId: "grp1" } }],
+    ["disableInviteCode", { user: admin, params: { groupId: "grp1" } }],
+    ["joinGroupWithCode", { user: admin, body: { code: "abc" } }],
   ];
   const handlers = {
     listGroupMembers,
@@ -1139,6 +1603,10 @@ test("groups: an admin cannot use the G1c group endpoints (403)", async () => {
     removeGroupMember,
     transferGroupOwner,
     dissolveGroup,
+    getInviteCode,
+    generateInviteCode,
+    disableInviteCode,
+    joinGroupWithCode,
   };
   for (const [fn, req] of cases) {
     const res = response();
@@ -1151,6 +1619,14 @@ test("groups: anonymous G1c requests are blocked with 401 by requireCustomer", a
   const res = response();
   await requireCustomer({}, res, () => assert.fail("anonymous should not reach the endpoint"));
   assert.equal(res.statusCode, 401);
+});
+
+test("groups: anonymous G1f (invite-code) requests are blocked with 401 by requireCustomer", async () => {
+  for (let i = 0; i < 4; i += 1) {
+    const res = response();
+    await requireCustomer({}, res, () => assert.fail("anonymous should not reach the endpoint"));
+    assert.equal(res.statusCode, 401);
+  }
 });
 
 // -------------------- Members list --------------------
@@ -1400,17 +1876,21 @@ test("messages: a non-member gets a uniform 404", async () => {
   assert.equal(res.body.error, "Group not found");
 });
 
-test("messages: nonexistent, dissolved and non-public groups are 404", async () => {
-  const groups = [
-    null,
-    groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }),
-    groupFixture({ type: "invite_only" }),
-  ];
-  for (const group of groups) {
+test("messages: nonexistent and dissolved groups are 404", async () => {
+  for (const [group, gid] of [[null, "ghost"], [groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }), "grp1"]]) {
     const db = makeDb(group ? { groups: [group], members: [memberFixture({ userId: "cus1" })] } : {});
     const res = response();
-    await listGroupMessages({ user: userFixture(), params: { groupId: group ? "grp1" : "ghost" }, query: {} }, res, db);
+    await listGroupMessages({ user: userFixture(), params: { groupId: gid }, query: {} }, res, db);
     assert.equal(res.statusCode, 404);
+  }
+});
+
+test("messages: a member of a non-public group reads the feed (200)", async () => {
+  for (const type of ["private", "invite_only"]) {
+    const db = makeDb({ groups: [groupFixture({ type })], members: [memberFixture({ userId: "cus1" })] });
+    const res = response();
+    await listGroupMessages({ user: userFixture(), params: { groupId: "grp1" }, query: {} }, res, db);
+    assert.equal(res.statusCode, 200, `${type} members must be able to read the feed`);
   }
 });
 
@@ -1615,24 +2095,28 @@ test("send: a blocked NON-member gets 404 (blocked check runs after membership)"
   assert.equal(res.body.error, "Group not found");
 });
 
-test("send: nonexistent, dissolved and non-public groups are 404", async () => {
+test("send: nonexistent and dissolved groups are 404", async () => {
   groupMessagePerGroupLimiter._reset();
   groupMessagePerCustomerLimiter._reset();
-  const groupCases = [
-    null,
-    groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }),
-    groupFixture({ type: "private" }),
-  ];
-  for (const group of groupCases) {
+  for (const [group, gid] of [[null, "ghost"], [groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }), "grp1"]]) {
     const db = makeDb(group ? { groups: [group], members: [memberFixture({ userId: "cus1" })] } : {});
     const res = response();
     await sendGroupMessage(
-      { user: userFixture(), params: { groupId: group ? "grp1" : "ghost" }, body: { content: "hi" } },
+      { user: userFixture(), params: { groupId: gid }, body: { content: "hi" } },
       res,
       db,
     );
     assert.equal(res.statusCode, 404);
   }
+});
+
+test("send: a member of a private group can send (201)", async () => {
+  groupMessagePerGroupLimiter._reset();
+  groupMessagePerCustomerLimiter._reset();
+  const db = makeDb({ groups: [groupFixture({ type: "private" })], members: [memberFixture({ userId: "cus1" })] });
+  const res = response();
+  await sendGroupMessage({ user: userFixture(), params: { groupId: "grp1" }, body: { content: "hi" } }, res, db);
+  assert.equal(res.statusCode, 201);
 });
 
 test("send rate limit: 10 messages to one group then the 11th is 429, other groups stay open", async () => {
@@ -1796,18 +2280,46 @@ test("delete: a message from another group cannot be deleted (404, IDOR safe)", 
   assert.equal(res.body.error, "Message not found");
 });
 
-test("delete: nonexistent, dissolved and non-public groups are 404", async () => {
-  const groupCases = [null, groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }), groupFixture({ type: "private" })];
-  for (const group of groupCases) {
+test("delete: nonexistent and dissolved groups are 404", async () => {
+  for (const [group, gid] of [[null, "ghost"], [groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }), "grp1"]]) {
     const db = makeDb(group ? { groups: [group], members: [memberFixture({ userId: "cus1" })] } : {});
     const res = response();
     await deleteGroupMessage(
-      { user: userFixture(), params: { groupId: group ? "grp1" : "ghost", messageId: "msg1" } },
+      { user: userFixture(), params: { groupId: gid, messageId: "msg1" } },
       res,
       db,
     );
     assert.equal(res.statusCode, 404);
   }
+});
+
+test("delete: a member of a non-public group can delete their own message", async () => {
+  for (const type of ["private", "invite_only"]) {
+    const db = makeDb({
+      groups: [groupFixture({ type })],
+      members: [memberFixture({ userId: "cus1" })],
+      messages: [messageFixture({ senderId: "cus1" })],
+    });
+    const res = response();
+    await deleteGroupMessage({ user: userFixture(), params: { groupId: "grp1", messageId: "msg1" } }, res, db);
+    assert.equal(res.statusCode, 200, `${type} members must be able to delete their own message`);
+  }
+});
+
+test("delete: a non-member cannot reach messages in a non-public group", async () => {
+  const db = makeDb({
+    groups: [groupFixture({ type: "private" })],
+    members: [memberFixture({ userId: "cus2" })],
+    messages: [messageFixture({ senderId: "cus2" })],
+  });
+  const res = response();
+  await deleteGroupMessage(
+    { user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1", messageId: "msg1" } },
+    res,
+    db,
+  );
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.error, "Group not found");
 });
 
 test("delete: a blocked sender can still delete their own message", async () => {
@@ -1935,14 +2447,21 @@ test("update: a non-owner member and a non-member are both 403", async () => {
   }
 });
 
-test("update: nonexistent, dissolved and non-public groups are 404", async () => {
-  const groupCases = [null, groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }), groupFixture({ type: "invite_only" })];
-  for (const group of groupCases) {
+test("update: nonexistent and dissolved groups are 404", async () => {
+  for (const [group, gid] of [[null, "ghost"], [groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }), "grp1"]]) {
     const db = makeDb(group ? { groups: [group] } : {});
     const res = response();
-    await updateGroup({ user: userFixture(), params: { groupId: group ? "grp1" : "ghost" }, body: { name: "X" } }, res, db);
+    await updateGroup({ user: userFixture(), params: { groupId: gid }, body: { name: "X" } }, res, db);
     assert.equal(res.statusCode, 404);
   }
+});
+
+test("update: the owner can update their own non-public group", async () => {
+  const db = makeDb({ groups: [groupFixture({ type: "invite_only" })] });
+  const res = response();
+  await updateGroup({ user: userFixture(), params: { groupId: "grp1" }, body: { name: "Still Mine" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.group.name, "Still Mine");
 });
 
 test("update: a blocked owner can still update the group", async () => {
@@ -2025,14 +2544,24 @@ test("removeMember: a non-member cannot remove (403)", async () => {
   assert.equal(res.statusCode, 403);
 });
 
-test("removeMember: nonexistent, dissolved and non-public groups are 404", async () => {
-  const groupCases = [null, groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }), groupFixture({ type: "private" })];
-  for (const group of groupCases) {
+test("removeMember: nonexistent and dissolved groups are 404", async () => {
+  for (const [group, gid] of [[null, "ghost"], [groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }), "grp1"]]) {
     const db = makeDb(group ? { groups: [group] } : {});
     const res = response();
-    await removeGroupMember({ user: userFixture(), params: { groupId: group ? "grp1" : "ghost", userId: "cus2" } }, res, db);
+    await removeGroupMember({ user: userFixture(), params: { groupId: gid, userId: "cus2" } }, res, db);
     assert.equal(res.statusCode, 404);
   }
+});
+
+test("removeMember: the owner can remove members from their own non-public group", async () => {
+  const db = makeDb({
+    groups: [groupFixture({ type: "private" })],
+    members: [memberFixture({ userId: "cus1" }), memberFixture({ userId: "cus2" })],
+  });
+  const res = response();
+  await removeGroupMember({ user: userFixture(), params: { groupId: "grp1", userId: "cus2" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.removed, true);
 });
 
 test("removeMember: a userId in the body is ignored (params win)", async () => {
@@ -2152,14 +2681,26 @@ test("transfer: a non-owner cannot transfer (403)", async () => {
   assert.equal(res.statusCode, 403);
 });
 
-test("transfer: nonexistent, dissolved and non-public groups are 404", async () => {
-  const groupCases = [null, groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }), groupFixture({ type: "private" })];
-  for (const group of groupCases) {
+test("transfer: nonexistent and dissolved groups are 404", async () => {
+  for (const [group, gid] of [[null, "ghost"], [groupFixture({ dissolvedAt: t("2026-09-05T00:00:00Z") }), "grp1"]]) {
     const db = makeDb(group ? { groups: [group] } : {});
     const res = response();
-    await transferGroupOwner({ user: userFixture(), params: { groupId: group ? "grp1" : "ghost" }, body: { userId: "cus2" } }, res, db);
+    await transferGroupOwner({ user: userFixture(), params: { groupId: gid }, body: { userId: "cus2" } }, res, db);
     assert.equal(res.statusCode, 404);
   }
+});
+
+test("transfer: the owner can transfer their own non-public group", async () => {
+  const db = makeDb({
+    groups: [groupFixture({ type: "private" })],
+    members: [memberFixture({ userId: "cus1" }), memberFixture({ userId: "cus2" })],
+    users: [userRow({ id: "cus2", name: "Bob" })],
+  });
+  const res = response();
+  await transferGroupOwner({ user: userFixture(), params: { groupId: "grp1" }, body: { userId: "cus2" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  const stored = await db.group.findMany({});
+  assert.equal(stored[0].ownerId, "cus2");
 });
 
 test("transfer: missing, blank and non-string userId are rejected with 400", async () => {
@@ -2297,11 +2838,12 @@ test("dissolve: dissolved groups vanish from the discovery feed", async () => {
   assert.deepEqual(res.body.items.map((g) => g.id), ["g1"]);
 });
 
-test("dissolve: non-public groups are 404", async () => {
-  const db = makeDb({ groups: [groupFixture({ type: "invite_only" })] });
+test("dissolve: the owner can dissolve their own non-public group", async () => {
+  const db = makeDb({ groups: [groupFixture({ type: "invite_only" })], members: [memberFixture({ userId: "cus1" })] });
   const res = response();
   await dissolveGroup({ user: userFixture(), params: { groupId: "grp1" } }, res, db);
-  assert.equal(res.statusCode, 404);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.dissolved, true);
 });
 
 // -------------------- Security / IDOR sweep --------------------

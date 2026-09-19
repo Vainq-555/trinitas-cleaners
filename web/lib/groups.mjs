@@ -16,6 +16,15 @@ export const GROUP_NAME_MAX = 100;
 export const GROUP_DESCRIPTION_MAX = 500;
 export const GROUP_MESSAGE_MAX = 1000;
 
+// G1f group types, mirroring the server constants in
+// api/src/controllers/groups.js. A group's type is fixed at creation.
+export const GROUP_TYPE_PUBLIC = "public";
+export const GROUP_TYPE_PRIVATE = "private";
+export const GROUP_TYPE_INVITE_ONLY = "invite_only";
+export const GROUP_TYPES = [GROUP_TYPE_PUBLIC, GROUP_TYPE_PRIVATE, GROUP_TYPE_INVITE_ONLY];
+
+export const INVITE_CODE_MAX = 200;
+
 // ---------------------------------------------------------------------------
 // Limits & query building
 // ---------------------------------------------------------------------------
@@ -52,6 +61,36 @@ export function validateGroupDescription(value) {
   const clean = value.trim();
   if (clean.length > GROUP_DESCRIPTION_MAX) {
     return `Group descriptions are limited to ${GROUP_DESCRIPTION_MAX} characters.`;
+  }
+  return null;
+}
+
+// G1f: client-side type selector guard (the backend is authoritative).
+export function validateGroupType(value) {
+  if (typeof value === "string" && GROUP_TYPES.includes(value)) return null;
+  return 'Choose "Public", "Private" or "By invitation only".';
+}
+
+export function isNonPublicGroup(group) {
+  return Boolean(group) && typeof group.type === "string" && group.type !== GROUP_TYPE_PUBLIC;
+}
+
+export function requiresInvite(group) {
+  return Boolean(group) && group.type === GROUP_TYPE_INVITE_ONLY;
+}
+
+export function groupTypeLabel(type) {
+  if (type === GROUP_TYPE_PRIVATE) return "Private";
+  if (type === GROUP_TYPE_INVITE_ONLY) return "By invitation only";
+  return "Public";
+}
+
+export function validateInviteCode(value) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return "Enter the invite code you were given.";
+  }
+  if (value.trim().length > INVITE_CODE_MAX) {
+    return "That invite code is invalid.";
   }
   return null;
 }

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 const schemaPath = new URL("../prisma/schema.prisma", import.meta.url);
 const migrationPath = new URL("../prisma/migrations/20260920000000_add_community_groups/migration.sql", import.meta.url);
+const inviteCodeMigrationPath = new URL("../prisma/migrations/20260921000000_add_group_invite_code/migration.sql", import.meta.url);
 
 const schema = readFileSync(schemaPath, "utf8");
 const migration = readFileSync(migrationPath, "utf8");
@@ -152,6 +153,27 @@ test("G1a schema: existing Community/Profile/Message models unchanged", () => {
   for (const [name, lines] of Object.entries(expected)) {
     assert.deepEqual(blockLines(name), lines, `model ${name} must remain unchanged`);
   }
+});
+
+test("G1f schema: Group carries a nullable unique inviteCode", () => {
+  const block = modelBlock("Group");
+  assertHas(block, "inviteCode String? @unique");
+});
+
+test("G1f migration: additive-only ALTER on Group adding the unique invite code", () => {
+  const src = readFileSync(inviteCodeMigrationPath, "utf8");
+  assert.ok(
+    /\bALTER TABLE "Group" ADD COLUMN "inviteCode" TEXT;/m.test(src),
+    "migration must add the inviteCode column to Group",
+  );
+  assert.ok(
+    /CREATE UNIQUE INDEX "Group_inviteCode_key" ON "Group"\("inviteCode"\);/m.test(src),
+    "migration must create the unique index on inviteCode",
+  );
+  // The migration must not touch any other table.
+  const altered = new Set([...src.matchAll(/ALTER TABLE "([^"]+)"/g)].map((m) => m[1]));
+  assert.deepEqual([...altered], ["Group"], "only the Group table may be altered");
+  assert.ok(!/DROP\b/.test(src), "the migration must be additive-only");
 });
 
 test("G1a migration: additive-only, creates the three tables with cascade FKs", () => {

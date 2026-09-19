@@ -6,10 +6,20 @@ import {
   GROUP_NAME_MAX,
   GROUP_DESCRIPTION_MAX,
   GROUP_MESSAGE_MAX,
+  GROUP_TYPES,
+  GROUP_TYPE_PUBLIC,
+  GROUP_TYPE_PRIVATE,
+  GROUP_TYPE_INVITE_ONLY,
+  INVITE_CODE_MAX,
   isValidGroupsLimit,
   groupsQuery,
   validateGroupName,
   validateGroupDescription,
+  validateGroupType,
+  validateInviteCode,
+  isNonPublicGroup,
+  requiresInvite,
+  groupTypeLabel,
   validateGroupMessage,
   mergeGroupMessages,
   appendOlderGroupMessages,
@@ -94,7 +104,57 @@ test("groupsQuery rejects an invalid limit", () => {
   assert.equal(groupsQuery({ limit: "50" }), null);
 });
 
-// --- 3. Name validation ----------------------------------------------------
+// --- 3. G1f group types & invite codes --------------------------------------
+
+test("group type constants mirror the server's allowed types", () => {
+  assert.equal(GROUP_TYPE_PUBLIC, "public");
+  assert.equal(GROUP_TYPE_PRIVATE, "private");
+  assert.equal(GROUP_TYPE_INVITE_ONLY, "invite_only");
+  assert.deepEqual(GROUP_TYPES, ["public", "private", "invite_only"]);
+});
+
+test("validateGroupType accepts only the three server types", () => {
+  assert.equal(validateGroupType("public"), null);
+  assert.equal(validateGroupType("private"), null);
+  assert.equal(validateGroupType("invite_only"), null);
+  for (const bad of ["", "PUBLIC", "public ", "gossip", 12, null, undefined]) {
+    assert.notEqual(validateGroupType(bad), null, `type=${JSON.stringify(bad)} must be rejected`);
+  }
+});
+
+test("isNonPublicGroup and requiresInvite classify groups correctly", () => {
+  assert.equal(isNonPublicGroup({ type: "private" }), true);
+  assert.equal(isNonPublicGroup({ type: "invite_only" }), true);
+  assert.equal(isNonPublicGroup({ type: "public" }), false);
+  assert.equal(isNonPublicGroup({}), false);
+  assert.equal(isNonPublicGroup(null), false);
+  assert.equal(requiresInvite({ type: "invite_only" }), true);
+  assert.equal(requiresInvite({ type: "private" }), false);
+  assert.equal(requiresInvite({ type: "public" }), false);
+  assert.equal(requiresInvite({}), false);
+});
+
+test("groupTypeLabel renders friendly labels for each type", () => {
+  assert.equal(groupTypeLabel("public"), "Public");
+  assert.equal(groupTypeLabel("private"), "Private");
+  assert.equal(groupTypeLabel("invite_only"), "By invitation only");
+  assert.equal(groupTypeLabel("unknown"), "Public");
+  assert.equal(groupTypeLabel(undefined), "Public");
+});
+
+test("validateInviteCode requires a non-blank code and caps its length", () => {
+  assert.equal(validateInviteCode("secretcode123"), null);
+  assert.equal(validateInviteCode("  secretcode123  "), null);
+  assert.equal(validateInviteCode("x".repeat(INVITE_CODE_MAX)), null);
+  assert.match(validateInviteCode(""), /invite code/i);
+  assert.match(validateInviteCode("   \t "), /invite code/i);
+  assert.match(validateInviteCode(null), /invite code/i);
+  assert.match(validateInviteCode(undefined), /invite code/i);
+  assert.match(validateInviteCode(42), /invite code/i);
+  assert.match(validateInviteCode("x".repeat(INVITE_CODE_MAX + 1)), /invalid/i);
+});
+
+// --- 4. Name validation ----------------------------------------------------
 
 test("group name validation", () => {
   assert.match(validateGroupName(""), /required/i);
