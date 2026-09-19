@@ -6,7 +6,7 @@ on:
       commit:
         description: "Commit SHA to deploy (defaults to the pinned application commit)"
         required: false
-        default: "db55864ff6affe62c3a3540006f7ca90dd47b0b4"
+        default: "41db0744758f4d20e65f3b57309b1bedc5d8787f"
 
 permissions:
   contents: read
