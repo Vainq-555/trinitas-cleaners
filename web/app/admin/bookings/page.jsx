@@ -6,6 +6,7 @@ import {
   MessageSquare, Megaphone, Star, Check, X, Hammer, Inbox, CheckCircle2, ThumbsDown, BadgePercent, Wrench, BookOpen,
   Banknote, RotateCcw, Receipt, Store,
 MessageCircle,
+  UsersRound,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import StatusBadge from "@/components/StatusBadge";
@@ -26,6 +27,7 @@ const links = [
   { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
   { href: "/admin/community", label: "Community", icon: MessageCircle },
+  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
   { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
   { href: "/admin/content", label: "How It Works", icon: BookOpen },
 ];

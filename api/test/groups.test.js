@@ -765,13 +765,36 @@ test("G1f: a member of an invite_only group sees its detail flagged invite-gated
   assert.equal(res.body.group.requiresInvite, true);
 });
 
-test("G1f: private and invite_only details are a uniform 404 for non-members", async () => {
-  for (const type of ["private", "invite_only"]) {
-    const db = makeDb({ groups: [groupFixture({ type, inviteCode: "secretcode123" })] });
-    const res = response();
-    await getGroup({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" } }, res, db);
-    assert.equal(res.statusCode, 404, `${type} must hide from non-members`);
-    assert.equal(res.body.error, "Group not found");
+test("G1f: private details are a uniform 404 for non-members (no existence oracle)", async () => {
+  const db = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })] });
+  const res = response();
+  await getGroup({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" } }, res, db);
+  assert.equal(res.statusCode, 404, "private must hide from non-members");
+  assert.equal(res.body.error, "Group not found");
+});
+
+test("G1f: an invite_only non-member loads the safe detail to reach the invite-code join", async () => {
+  const db = makeDb({
+    groups: [groupFixture({ type: "invite_only", inviteCode: "secretcode123", owner: { id: "cus1", name: "Alice", email: "alice@x.com", communityBlockedAt: t("2026-09-01T00:00:00Z") } })],
+    users: [userRow({ id: "cus1", name: "Alice" })],
+  });
+  const res = response();
+  await getGroup({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  const g = res.body.group;
+  assert.deepEqual(g.id, "grp1");
+  assert.deepEqual(g.name, "Cleaning Hacks");
+  assert.equal(g.type, "invite_only");
+  assert.equal(g.requiresInvite, true);
+  assert.equal(g.joined, false);
+  assert.equal(g.memberCount, 0);
+  assert.deepEqual(g.owner, { id: "cus1", name: "Alice" });
+  assert.equal(g.members, undefined, "the roster must not leak to a non-member");
+  assert.equal(g.messages, undefined, "messages must not leak to a non-member");
+  assert.equal(g.inviteCode, undefined, "the invite code must never appear in detail");
+  const payload = JSON.stringify(res.body);
+  for (const forbidden of ["secretcode123", "email", "phone", "address", "password", "lastActiveAt", "communityBlockedAt", "status", "credential"]) {
+    assert.ok(!payload.toLowerCase().includes(forbidden.toLowerCase()), `detail must not contain ${forbidden}`);
   }
 });
 
@@ -838,13 +861,37 @@ test("G1f: a member of an invite_only group reads the message feed", async () =>
 });
 
 test("G1f: a non-member cannot read or write messages of a non-public group (404)", async () => {
-  const db = makeDb({ groups: [groupFixture({ type: "private", inviteCode: "secretcode123" })] });
-  const roster = response();
-  await listGroupMembers({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" }, query: {} }, roster, db);
-  assert.equal(roster.statusCode, 404);
-  const feed = response();
-  await listGroupMessages({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" }, query: {} }, feed, db);
-  assert.equal(feed.statusCode, 404);
+  for (const type of ["private", "invite_only"]) {
+    const db = makeDb({ groups: [groupFixture({ type, inviteCode: "secretcode123" })] });
+    const roster = response();
+    await listGroupMembers({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" }, query: {} }, roster, db);
+    assert.equal(roster.statusCode, 404, `${type} roster must hide from non-members`);
+    const feed = response();
+    await listGroupMessages({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" }, query: {} }, feed, db);
+    assert.equal(feed.statusCode, 404, `${type} feed must hide from non-members`);
+  }
+});
+
+test("G1f: a non-member cannot send a message to a non-public group (404)", async () => {
+  groupMessagePerGroupLimiter._reset();
+  groupMessagePerCustomerLimiter._reset();
+  for (const type of ["private", "invite_only"]) {
+    const db = makeDb({ groups: [groupFixture({ type, inviteCode: "secretcode123" })] });
+    const res = response();
+    await sendGroupMessage({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" }, body: { content: "inside" } }, res, db);
+    assert.equal(res.statusCode, 404, `${type} send must hide from non-members`);
+  }
+});
+
+test("G1f: by-path join trims a valid invite code with surrounding whitespace", async () => {
+  groupMembershipLimiter._reset();
+  for (const type of ["private", "invite_only"]) {
+    const db = makeDb({ groups: [groupFixture({ type, inviteCode: "secretcode123" })] });
+    const res = response();
+    await joinGroup({ user: userFixture({ id: "cus3", name: "Carol" }), params: { groupId: "grp1" }, body: { code: "  secretcode123  " } }, res, db);
+    assert.equal(res.statusCode, 200, `${type} by-path join must trim the code`);
+    assert.equal(res.body.ok, true);
+  }
 });
 
 test("G1f: a member of a private group can send a message", async () => {
@@ -1028,6 +1075,19 @@ test("G1f: joinGroupWithCode resolves a private group from the code and joins", 
   assert.equal(res.body.ok, true);
   assert.equal(res.body.groupId, "grp1");
   assert.deepEqual(res.body.group, { id: "grp1", name: "Cleaning Hacks", type: "private" });
+  const members = await db.groupMember.findMany({});
+  assert.deepEqual(members.map((m) => m.userId).sort(), ["cus1", "cus2"]);
+});
+
+test("G1f: joinGroupWithCode resolves an invite_only group from the code and joins", async () => {
+  groupMembershipLimiter._reset();
+  const db = makeDb({ groups: [groupFixture({ type: "invite_only", inviteCode: "secretcode123" })], members: [memberFixture({ userId: "cus1" })] });
+  const res = response();
+  await joinGroupWithCode({ user: userFixture({ id: "cus2", name: "Bob" }), body: { code: "secretcode123" } }, res, db);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.groupId, "grp1");
+  assert.deepEqual(res.body.group, { id: "grp1", name: "Cleaning Hacks", type: "invite_only" });
   const members = await db.groupMember.findMany({});
   assert.deepEqual(members.map((m) => m.userId).sort(), ["cus1", "cus2"]);
 });

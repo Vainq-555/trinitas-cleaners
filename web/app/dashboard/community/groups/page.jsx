@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings, Star,
-  Users, Send, Plus, X, RefreshCw, MessageCircle,
+  Users, Send, Plus, X, RefreshCw, MessageCircle, KeyRound,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api } from "@/lib/api";
@@ -20,8 +20,10 @@ import {
   validateGroupName,
   validateGroupDescription,
   validateGroupType,
+  validateInviteCode,
   requiresInvite,
   groupTypeLabel,
+  joinWithCodeTarget,
   isBlockedError,
   isRateLimitError,
 } from "@/lib/groups";
@@ -61,6 +63,12 @@ export default function GroupsListPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createNotice, setCreateNotice] = useState("");
+
+  const [joinOpen, setJoinOpen] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState("");
+  const [joinNotice, setJoinNotice] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -163,6 +171,57 @@ export default function GroupsListPage() {
     }
   };
 
+  // Join a private or invitation-only group from the owner's shareable code.
+  // The backend resolves the group from the code alone (no group id needed).
+  const joinWithCode = async (e) => {
+    e.preventDefault();
+    if (joining) return;
+    const problem = validateInviteCode(joinCode);
+    if (problem) {
+      setJoinError(problem);
+      setJoinNotice("");
+      return;
+    }
+    setJoining(true);
+    setJoinError("");
+    setJoinNotice("");
+    try {
+      const data = await api("/community/groups/join-with-code", {
+        method: "POST",
+        body: { code: joinCode.trim() },
+      });
+      const target = joinWithCodeTarget(data);
+      if (target) {
+        router.push(`/dashboard/community/groups/${encodeURIComponent(target)}`);
+        return;
+      }
+      setJoinNotice("You've joined the group.");
+      setJoinCode("");
+      load();
+    } catch (err) {
+      if (isBlockedError(err)) {
+        setJoinNotice("You're currently blocked from joining groups.");
+      } else if (isRateLimitError(err)) {
+        setJoinError("You've changed your group memberships too quickly. Please wait a minute and try again.");
+      } else if (err.status === 404) {
+        setJoinError("That invite code didn't match an open group. Double-check it and try again.");
+      } else if (err.status === 401) {
+        setJoinNotice("Your session has expired. Please sign in again.");
+      } else {
+        setJoinError(err.message || "Couldn't join with that code. Please try again.");
+      }
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const closeJoin = () => {
+    setJoinOpen(false);
+    setJoinError("");
+    setJoinNotice("");
+    setJoinCode("");
+  };
+
   return (
     <Shell links={links} sections={["Customer Portal"]} title="Groups"
       subtitle="Join customer groups around life, home, and cleaning.">
@@ -237,6 +296,56 @@ export default function GroupsListPage() {
             <p className="text-sm text-muted">Start a group — public, private, or by invitation only.</p>
             <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>
               <Plus size={16} /> Create a group
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Join by invite code */}
+      <div className="card card-pad mb-6">
+        {joinOpen ? (
+          <form className="grid gap-3" onSubmit={joinWithCode}>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-bold text-ink">Join with invite code</h2>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={closeJoin} aria-label="Close join with invite code form">
+                <X size={15} /> Close
+              </button>
+            </div>
+            <p className="text-sm text-muted">
+              Have an invite code? Enter it here to join a private or invitation-only group.
+            </p>
+            <div>
+              <label htmlFor="join-code" className="sr-only">Invite code</label>
+              <input
+                id="join-code"
+                className="input w-full"
+                placeholder="Enter the invite code you were given"
+                value={joinCode}
+                onChange={(e) => {
+                  setJoinCode(e.target.value);
+                  if (joinError) setJoinError("");
+                  if (joinNotice) setJoinNotice("");
+                }}
+                disabled={joining}
+                autoComplete="off"
+              />
+            </div>
+            <div className="text-right" aria-live="polite">
+              {joinNotice && <p className="form-ok mb-1">{joinNotice}</p>}
+              {joinError && <p className="form-error mb-1">{joinError}</p>}
+              <button className="btn btn-primary" disabled={joining || !joinCode.trim()}>
+                <KeyRound size={16} /> {joining ? "Joining…" : "Join group"}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold text-ink">Got an invite to a private group?</p>
+              <p className="text-sm text-muted">Enter your invite code to join a private or invitation-only group.</p>
+            </div>
+            <button className="btn btn-outline" onClick={() => setJoinOpen(true)}>
+              <KeyRound size={16} /> Join with invite code
             </button>
           </div>
         )}

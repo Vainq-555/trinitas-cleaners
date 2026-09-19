@@ -106,6 +106,16 @@ export const mergeGroupMessages = mergeNewest;
 export const appendOlderGroupMessages = appendOlder;
 export const chronologicalGroupMessages = chronological;
 
+// Admin Groups list pagination reuses the identical newest-first contract the
+// server returns for /admin/community/groups (createdAt DESC, id DESC, cursor).
+export const mergeAdminGroups = mergeNewest;
+
+// Admin moderation state label from the admin group shape's derived `status`
+// ("active" when dissolvedAt is null, "dissolved" otherwise).
+export function adminGroupStatusLabel(status) {
+  return status === "dissolved" ? "Dissolved" : "Active";
+}
+
 // ---------------------------------------------------------------------------
 // Member helpers — joinedAt DESC, userId DESC
 // ---------------------------------------------------------------------------
@@ -139,6 +149,13 @@ export function applyMembership(prevJoined, result) {
   if (result && result.joined === true) return true;
   if (result && result.left === true) return false;
   return Boolean(prevJoined);
+}
+
+// join-with-code navigation decision: the backend resolves the group from the
+// code alone and returns its id, so the caller can route to the joined group.
+// Returns null when the result has no usable group id (no navigation).
+export function joinWithCodeTarget(result) {
+  return result && typeof result.groupId === "string" && result.groupId ? result.groupId : null;
 }
 
 // ---------------------------------------------------------------------------

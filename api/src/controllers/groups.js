@@ -93,7 +93,14 @@ function parseGroupLimit(req) {
 // and no owner beyond the public identity reused by the Community feed
 // (id + name). requiresInvite is derived from the immutable type so the UI can
 // show the "By invitation only" gate without ever receiving the code itself.
-const ownerShape = (o) => ({ id: o?.id ?? null, name: o?.name ?? null });
+
+// Public owner/member name: the CommunityProfile displayName is used when a
+// profile exists, falling back to the username — the same public-name
+// convention as profiles.js publicShape (used by the roster and message feed).
+// Never an account field; owners and members always expose id + name.
+const publicName = (u) => u?.communityProfile?.displayName ?? u?.name ?? null;
+
+const ownerShape = (o) => ({ id: o?.id ?? null, name: publicName(o) });
 
 const groupShape = (g, memberCount, joined) => ({
   id: g.id,
@@ -118,12 +125,9 @@ const groupDetailShape = (g, memberCount, joined) => ({
 const isOnline = (user) =>
   Boolean(user?.lastActiveAt) && Date.now() - user.lastActiveAt.getTime() < ONLINE_TTL_MS;
 
-// Public member identity. The CommunityProfile displayName/avatarUrl are used
-// when a profile exists, falling back to the username and no avatar. The online
-// presence key is omitted (not false) when the member opted out, mirroring
-// profiles.js publicShape. Members always have id + name — never email/phone/
-// address/role/status/lastActiveAt/communityBlockedAt.
-const publicName = (u) => u?.communityProfile?.displayName ?? u?.name ?? null;
+// The CommunityProfile avatarUrl is used when a profile exists, falling back to
+// no avatar. The online presence key is omitted (not false) when the member
+// opted out, mirroring profiles.js publicShape.
 const publicAvatar = (u) => u?.communityProfile?.avatarUrl ?? null;
 
 const senderShape = (s) => ({
@@ -205,6 +209,16 @@ const memberInclude = {
       lastActiveAt: true,
       communityProfile: { select: { displayName: true, avatarUrl: true, showOnline: true } },
     },
+  },
+};
+
+// Owner projection for every owner-bearing group response. The owner's public
+// identity is id + the Community feed's public name (displayName fallback), so
+// the header, roster, messages and admin views all show the same owner name.
+// displayName is fetched so ownerShape can apply the public-name convention.
+const ownerInclude = {
+  owner: {
+    select: { id: true, name: true, communityProfile: { select: { displayName: true } } },
   },
 };
 
@@ -375,9 +389,13 @@ export const createGroup = wrap(async function createGroup(req, res, next, db = 
 
 // GET /api/community/groups/:groupId — safe group detail. Nonexistent and
 // dissolved groups behave as a uniform 404. public groups are readable by every
-// authenticated customer (existing behavior). private groups (never listed) and
-// invite_only groups are readable only by their members: a non-member gets the
-// same 404 as a missing group, so membership is never disclosed.
+// authenticated customer (existing behavior). private groups (never listed) are
+// readable only by their members: a non-member gets the same 404 as a missing
+// group, so private-group existence is never disclosed. invite_only groups are
+// discoverable by design (listGroups), so a non-member may load the same safe
+// group-level detail discovery already returns (plus the owner's public
+// identity) to reach the invite-code join flow. Members and messages stay
+// member-only and the invite code is never part of any group response.
 export const getGroup = wrap(async function getGroup(req, res, next, db = prisma) {
   if (!req.user || req.user.role !== ROLES.CUSTOMER) {
     return res.status(403).json({ error: "Only customers can view groups" });
@@ -388,11 +406,15 @@ export const getGroup = wrap(async function getGroup(req, res, next, db = prisma
 
   const group = await db.group.findFirst({
     where: { id: groupId, dissolvedAt: null },
-    include: { owner: { select: { id: true, name: true } } },
+    include: ownerInclude,
   });
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
-  if (group.type !== GROUP_TYPE_PUBLIC) {
+  // private groups are never listed and never disclosed: only active members
+  // (and the owner) may load the detail. invite_only groups are intentionally
+  // discoverable, so non-members get the safe detail (no roster, no messages)
+  // through the shared groupDetailShape below.
+  if (group.type === GROUP_TYPE_PRIVATE) {
     if (await requireActiveMember(req, res, db, groupId)) return;
   }
 
@@ -428,8 +450,8 @@ export const joinGroup = wrap(async function joinGroup(req, res, next, db = pris
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 
   if (group.type !== GROUP_TYPE_PUBLIC) {
-    const code = req.body?.code;
-    if (typeof code !== "string" || !group.inviteCode || code !== group.inviteCode) {
+    const code = typeof req.body?.code === "string" ? req.body.code.trim() : null;
+    if (!group.inviteCode || !code || code !== group.inviteCode) {
       return res.status(404).json({ error: NOT_FOUND_ERROR });
     }
   }
@@ -734,7 +756,7 @@ export const updateGroup = wrap(async function updateGroup(req, res, next, db = 
   const updated = await db.group.update({
     where: { id: groupId },
     data,
-    include: { owner: { select: { id: true, name: true } } },
+    include: ownerInclude,
   });
 
   const members = await db.groupMember.findMany({ where: { groupId } });
@@ -807,7 +829,10 @@ export const transferGroupOwner = wrap(async function transferGroupOwner(req, re
     return res.status(403).json({ error: "Only the group owner can transfer ownership" });
   }
 
-  const target = await db.user.findUnique({ where: { id: userId } });
+  const target = await db.user.findUnique({
+    where: { id: userId },
+    include: { communityProfile: { select: { displayName: true } } },
+  });
   if (!target) return res.status(404).json({ error: "User not found" });
   if (target.role !== ROLES.CUSTOMER) {
     return res.status(400).json({ error: "Ownership can only be transferred to a customer" });
@@ -824,7 +849,7 @@ export const transferGroupOwner = wrap(async function transferGroupOwner(req, re
   const updated = await db.group.update({
     where: { id: groupId },
     data: { ownerId: target.id },
-    include: { owner: { select: { id: true, name: true } } },
+    include: ownerInclude,
   });
 
   const members = await db.groupMember.findMany({ where: { groupId } });
@@ -1029,7 +1054,7 @@ export const adminListGroups = wrap(async function adminListGroups(req, res, nex
     where,
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
-    include: { owner: { select: { id: true, name: true } } },
+    include: ownerInclude,
   });
 
   const hasMore = rows.length > limit;
@@ -1062,7 +1087,7 @@ export const adminGetGroup = wrap(async function adminGetGroup(req, res, next, d
 
   const group = await db.group.findFirst({
     where: { id: groupId },
-    include: { owner: { select: { id: true, name: true } } },
+    include: ownerInclude,
   });
   if (!group) return res.status(404).json({ error: NOT_FOUND_ERROR });
 

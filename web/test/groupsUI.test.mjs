@@ -38,6 +38,9 @@ import {
   memberName,
   memberAvatarUrl,
   isOnlineMember,
+  joinWithCodeTarget,
+  adminGroupStatusLabel,
+  mergeAdminGroups,
 } from "../lib/groups.mjs";
 
 const msg = (id, iso, overrides = {}) => ({
@@ -327,4 +330,29 @@ test("online indicator appears only when explicitly true", () => {
   assert.equal(isOnlineMember({ user: {} }), false);
   assert.equal(isOnlineMember({}), false);
   assert.equal(isOnlineMember(null), false);
+});
+
+// --- Admin Groups helpers -------------------------------------------------
+
+test("joinWithCodeTarget returns the resolved group id for navigation", () => {
+  assert.equal(joinWithCodeTarget({ groupId: "grp9", joined: true, group: { id: "grp9", name: "G", type: "private" } }), "grp9");
+  assert.equal(joinWithCodeTarget({ joined: true }), null);
+  assert.equal(joinWithCodeTarget({ groupId: "" }), null);
+  assert.equal(joinWithCodeTarget(null), null);
+  assert.equal(joinWithCodeTarget(undefined), null);
+});
+
+test("adminGroupStatusLabel maps the derived active/dissolved status", () => {
+  assert.equal(adminGroupStatusLabel("active"), "Active");
+  assert.equal(adminGroupStatusLabel("dissolved"), "Dissolved");
+  assert.equal(adminGroupStatusLabel(undefined), "Active");
+  assert.equal(adminGroupStatusLabel(null), "Active");
+});
+
+test("mergeAdminGroups dedupes paginated admin groups newest-first", () => {
+  const page1 = [grp("g3", "2026-09-10T00:00:00Z", { name: "Three" }), grp("g2", "2026-09-09T00:00:00Z", { name: "Two" })];
+  const page2 = [grp("g3", "2026-09-10T00:00:00Z", { name: "Three-updated" }), grp("g1", "2026-09-08T00:00:00Z", { name: "One" })];
+  const merged = mergeAdminGroups(page1, page2);
+  assert.deepEqual(merged.map((g) => g.id), ["g3", "g2", "g1"]);
+  assert.equal(merged[0].name, "Three-updated");
 });

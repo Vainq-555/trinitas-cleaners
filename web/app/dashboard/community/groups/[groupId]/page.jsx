@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings, Star,
   Users, Send, RefreshCw, ArrowLeft, Pencil, Trash2, Crown, ArrowRightLeft,
-  Check, MessageCircle, UserRound,
+  Check, Copy, MessageCircle, UserRound,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api, fmtDate, fmtDateTime } from "@/lib/api";
@@ -99,6 +99,7 @@ export default function GroupDetailPage({ params }) {
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [inviteNotice, setInviteNotice] = useState("");
+  const [inviteCopied, setInviteCopied] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState("");
 
@@ -211,8 +212,9 @@ export default function GroupDetailPage({ params }) {
     try {
       await api("/community/groups/join-with-code", { method: "POST", body: { code: joinCode.trim() } });
       setJoinCode("");
-      setGroup((prev) => (prev ? { ...prev, joined: true } : prev));
-      await loadExtra();
+      // Re-fetch the group so joined/memberCount reflect server truth; load()
+      // then fetches the member-only roster and feed now that we are a member.
+      await load();
     } catch (err) {
       if (isBlockedError(err)) setBlocked(true);
       else if (isRateLimitError(err)) setActionError("You've changed your group memberships too quickly. Please wait a minute and try again.");
@@ -221,6 +223,21 @@ export default function GroupDetailPage({ params }) {
       else setJoinError(err.message || "Couldn't join with that code. Please try again.");
     } finally {
       setBusy(null);
+    }
+  };
+
+  const copyInviteCode = async () => {
+    if (!inviteCode) return;
+    if (!navigator?.clipboard?.writeText) {
+      setInviteError("Copy isn't supported by your browser — select the code manually.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(inviteCode);
+      setInviteCopied(true);
+      window.setTimeout(() => setInviteCopied(false), 2000);
+    } catch {
+      setInviteError("Couldn't copy the code. Please select it manually.");
     }
   };
 
@@ -245,6 +262,7 @@ export default function GroupDetailPage({ params }) {
     setInviteBusy(true);
     setInviteError("");
     setInviteNotice("");
+    setInviteCopied(false);
     try {
       const data = await api(`/community/groups/${encodeURIComponent(groupId)}/invite-code`, { method: "POST" });
       setInviteCode(data.inviteCode ?? null);
@@ -262,6 +280,7 @@ export default function GroupDetailPage({ params }) {
     setInviteBusy(true);
     setInviteError("");
     setInviteNotice("");
+    setInviteCopied(false);
     try {
       const data = await api(`/community/groups/${encodeURIComponent(groupId)}/invite-code`, { method: "DELETE" });
       setInviteCode(data.inviteCode ?? null);
@@ -433,9 +452,14 @@ export default function GroupDetailPage({ params }) {
   };
 
   const askRemove = (member) => {
+    // public groups are open to anyone; private and invite_only groups are gated
+    // by an invite code, so "rejoin anytime" would be misleading for them.
+    const rejoinNote = group && isNonPublicGroup(group)
+      ? "They'll need a new invite code to rejoin."
+      : "They can rejoin anytime from the groups page.";
     setConfirm({
       title: "Remove member",
-      body: `${memberName(member)} will be removed from this group. They can rejoin anytime.`,
+      body: `${memberName(member)} will be removed from this group. ${rejoinNote}`,
       confirmLabel: "Remove member",
       danger: true,
       run: runRemove,
@@ -740,9 +764,20 @@ export default function GroupDetailPage({ params }) {
                     <p className="mt-2 text-sm text-muted">Loading code…</p>
                   ) : inviteCode ? (
                     <div className="mt-3">
-                      <code className="rounded-lg border border-line bg-slate-50 px-3 py-1.5 font-mono text-base font-semibold tracking-wide text-ink">
-                        {inviteCode}
-                      </code>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <code className="rounded-lg border border-line bg-slate-50 px-3 py-1.5 font-mono text-base font-semibold tracking-wide text-ink">
+                          {inviteCode}
+                        </code>
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          onClick={copyInviteCode}
+                          disabled={inviteBusy}
+                          title="Copy invite code"
+                        >
+                          {inviteCopied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
+                        </button>
+                      </div>
                       <p className="mt-2 text-xs text-muted">
                         Anyone with this code can join. Rotate it to revoke access, or disable it to close new joins.
                       </p>
