@@ -1,13 +1,14 @@
 import Stripe from "stripe";
 import prisma from "../utils/prisma.js";
 import { badRequest } from "../utils/validators.js";
-import { PUBLIC_WEB_URL, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET } from "../config.js";
+import { PUBLIC_WEB_URL, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, stripeSecretKeyMode } from "../config.js";
 import { dollarsToCents, centsToLegacyDollars, basisPointsToLegacyRate } from "../utils/money.js";
 import { calculatePreTaxQuote } from "../utils/promotions.js";
 import { calculateStripeTax, TaxAddressRequiredError, TaxUnavailableError } from "../utils/tax.js";
 import { calculateFinalQuote, promotionSnapshot } from "../utils/pricing.js";
 import { claimPromotionUsage } from "../utils/promotionUsage.js";
 import { sendBookingConfirmationEmail } from "../utils/mail.js";
+import { isSubscriptionEvent, processSubscriptionWebhook, finalizeStripeCancelAtPeriodEnd } from "./subscriptions.js";
 
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 const paymentInclude = { service: true, customer: { select: { name: true, email: true } }, payment: true };
@@ -154,7 +155,7 @@ export async function createCheckout(req, res) {
 
   if (!confirm) return res.json({ requiresConfirmation: true, quote: publicQuote(quote) });
   if (!Number.isInteger(approvedFinalAmountCents) || approvedFinalAmountCents !== quote.finalAmountCents) return badRequest(res, "The approved amount does not match the current quote");
-  if (!stripe || !STRIPE_SECRET_KEY.startsWith("sk_test_")) return res.status(503).json({ error: "Stripe test mode is not configured", retryable: true });
+  if (!stripe || !stripeSecretKeyMode()) return res.status(503).json({ error: "Stripe is not configured for this environment", retryable: true });
 
   if (booking.promotionId && !booking.promotionUsageClaimedAt) {
     try {
@@ -229,6 +230,15 @@ export async function createSnapshotReceipt(tx, booking, payment) {
 
 export async function processEvent(tx, event) {
   const data = event.data.object;
+
+  // Monthly subscription webhook lane: checkout.session.completed in
+  // subscription mode, invoice.* and customer.subscription.* events. These are
+  // processed by the isolated subscription handlers and never touch the
+  // one-time payment path below.
+  if (isSubscriptionEvent(event)) {
+    return await processSubscriptionWebhook(tx, event);
+  }
+
   const bookingId = data.metadata?.bookingId;
   const paymentWhere = bookingId ? { bookingId } : data.id.startsWith("cs_") ? { stripeCheckoutSessionId: data.id } : { stripePaymentIntentId: data.payment_intent || data.id };
   const payment = await tx.payment.findFirst({ where: paymentWhere });
@@ -279,6 +289,9 @@ export async function processEvent(tx, event) {
 export async function sendPaidBookingConfirmation(event, deps = {}) {
   const { db = prisma, sendConfirmation = sendBookingConfirmationEmail } = deps;
   const data = event.data?.object ?? {};
+  // Monthly subscription sessions activate via invoice.paid (which has its own
+  // lifecycle); never send the one-time booking confirmation for these.
+  if (data.mode === "subscription") return { sent: false, reason: "subscription-mode" };
   const bookingId = data.metadata?.bookingId;
   if (!bookingId) return { sent: false, reason: "missing-booking-id" };
 
@@ -303,10 +316,11 @@ export async function stripeWebhook(req, res) {
     return res.status(400).json({ error: `Webhook signature verification failed: ${error.message}` });
   }
   console.info("Stripe webhook received", { eventType: event.type, eventId: event.id });
+  let outcome;
   try {
     await prisma.$transaction(async (tx) => {
       await tx.stripeWebhookEvent.create({ data: { eventId: event.id, eventType: event.type } });
-      await processEvent(tx, event);
+      outcome = await processEvent(tx, event);
     });
   } catch (error) {
     if (error.code === "P2002" && error.meta?.target?.includes("eventId")) return res.json({ received: true, duplicate: true });
@@ -317,6 +331,21 @@ export async function stripeWebhook(req, res) {
     console.error("Stripe webhook processing failed", error);
     return res.status(500).json({ error: "Webhook processing failed" });
   }
+
+  // PART G — the final paid month is durably recorded above; now ask Stripe to
+  // cancel at period end so the customer never receives a fourth month. Failure
+  // leaves finalCancelPending=true for safe reconciliation/retry.
+  if (outcome?.finalCancel?.subscriptionId) {
+    try {
+      await finalizeStripeCancelAtPeriodEnd(outcome.finalCancel);
+    } catch (cancelError) {
+      console.error("[monthly subscription] Stripe cancel_at_period_end failed — durable pending state left for reconciliation", {
+        subscriptionId: outcome.finalCancel.subscriptionId,
+        error: cancelError?.message ?? "unknown error",
+      });
+    }
+  }
+
   try {
     await sendPaidBookingConfirmation(event);
   } catch (emailError) {

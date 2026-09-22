@@ -9,7 +9,7 @@ MessageCircle,
   UsersRound,
 } from "lucide-react";
 import Shell from "@/components/Shell";
-import { api } from "@/lib/api";
+import { api, moneyCents } from "@/lib/api";
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -126,6 +126,7 @@ export default function PricingPage() {
                 <th>Service</th>
                 <th><Globe size={12} className="inline -mt-0.5 mr-1" />Global base price</th>
                 <th><UserRound size={12} className="inline -mt-0.5 mr-1" />Per-customer price</th>
+                <th>Monthly price (per month)</th>
                 <th className="text-right">Override</th>
               </tr>
             </thead>
@@ -168,6 +169,18 @@ export default function PricingPage() {
                         <span className="text-xs text-muted">Select a customer above</span>
                       )}
                     </td>
+                    <td>
+                      {s.monthlyActive && Number.isInteger(s.monthlyPriceCents) && s.monthlyPriceCents >= 0 ? (
+                        <div className="space-y-1">
+                          <div className="font-semibold text-brand whitespace-nowrap">{moneyCents(s.monthlyPriceCents)}<span className="font-normal text-muted"> / month</span></div>
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-okbg px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-clean-dark border border-green-200">
+                            <span className="h-1.5 w-1.5 rounded-full bg-clean" /> Monthly booking on
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted">Not offered</span>
+                      )}
+                    </td>
                     <td className="text-right">
                       {hasOverride && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-warnbg px-2.5 py-1 text-[11px] font-bold uppercase text-amber-700">
@@ -187,6 +200,8 @@ export default function PricingPage() {
       <p className="mt-4 text-xs text-muted">
         Global price changes affect the public site and all customer accounts immediately.
         Per-customer overrides affect only the selected account.
+        The monthly column shows the per-service monthly price (billed every month) for
+        services with monthly booking enabled.
       </p>
     </Shell>
   );

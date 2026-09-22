@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   Home, CalendarCheck, Sparkles, ReceiptText, MessageSquare, Settings,
   Star, Trash2, CalendarPlus,
@@ -11,6 +11,17 @@ import Shell from "@/components/Shell";
 import StatusBadge from "@/components/StatusBadge";
 import { api, fmtDate, money, moneyCents } from "@/lib/api";
 import { useMyLocation } from "@/lib/geo";
+import {
+  isMonthlyBooking,
+  subscriptionStatusInfo,
+  subscriptionTerm,
+  subscriptionProgress,
+  subscriptionMonthlyPriceCents,
+  subscriptionPeriodText,
+  canPayNow,
+  subscriptionGuidance,
+  subscriptionReturnMessage,
+} from "@/lib/subscriptions";
 
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
@@ -62,8 +73,15 @@ export default function BookingsPage() {
             ? `Payment received for booking #${bookingId.slice(0, 6).toUpperCase()}. If the status still shows pending, it will update in a few seconds.`
             : "Payment received. Thank you!",
         });
-        // Give the webhook a moment to land, then refresh the list once.
-        setTimeout(() => api("/bookings").then((d) => setBookings(d.bookings)).catch(() => {}), 2500);
+        // Give the webhook a moment to land, then refresh the list once. A
+        // monthly booking refreshes to its subscription-specific copy.
+        setTimeout(() => api("/bookings").then((d) => {
+          setBookings(d.bookings);
+          const target = d.bookings.find((item) => item.id === bookingId);
+          if (target?.subscription) {
+            setBanner({ kind: "ok", text: subscriptionReturnMessage(target) });
+          }
+        }).catch(() => {}), 2500);
       } else {
         setBanner({
           kind: "error",
@@ -93,6 +111,20 @@ export default function BookingsPage() {
   };
 
   const pay = (id) => requestQuote(id);
+
+  // Monthly bookings pay through the subscription checkout endpoint (Stripe
+  // subscription mode). The backend returns the hosted Checkout URL directly.
+  const paySubscription = async (id) => {
+    setPaying(id);
+    try {
+      const { url } = await api(`/bookings/${id}/subscription/checkout`, { method: "POST", body: {} });
+      window.location.assign(url);
+    } catch (e) {
+      alert(e.message);
+      setPaying(null);
+      load();
+    }
+  };
 
   const submitAddress = (event) => {
     event.preventDefault();
@@ -215,10 +247,23 @@ export default function BookingsPage() {
               </thead>
               <tbody>
                 {shown.map((b) => (
-                  <tr key={b.id}>
-                    <td className="font-semibold">{b.service.name}</td>
+                  <Fragment key={b.id}>
+                  <tr>
+                    <td className="font-semibold">
+                      {b.service.name}
+                      {b.subscription && (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand">
+                          Monthly
+                        </span>
+                      )}
+                    </td>
                     <td className="text-muted">{fmtDate(b.date)}</td>
-                    <td><StatusBadge status={b.status} /></td>
+                    <td>
+                      <StatusBadge status={b.status} />
+                      {b.subscription && subscriptionStatusInfo(b.subscription).status && (
+                        <div className="mt-1"><StatusBadge status={subscriptionStatusInfo(b.subscription).status} /></div>
+                      )}
+                    </td>
                     <td className="font-semibold">
                       {b.payment?.method === "cash"
                         ? (Number.isInteger(b.finalAmountCents)
@@ -232,15 +277,15 @@ export default function BookingsPage() {
                     </td>
                     <td className="text-muted text-xs max-w-[180px] truncate">{b.note || "—"}</td>
                     <td className="text-right">
-                      {b.payment?.method === "online" && b.status === "accepted" && !["paid", "refunded"].includes(b.payment?.status) && (
+                      {b.payment?.method === "online" && b.status === "accepted" && !b.subscription && !["paid", "refunded"].includes(b.payment?.status) && (
                         <button className="btn btn-primary btn-sm mr-2" disabled={paying === b.id} onClick={() => pay(b.id)}>
                           <CalendarPlus size={14} /> Pay now
                         </button>
                       )}
-                      {b.payment?.method === "online" && b.status === "pending" && (
+                      {b.payment?.method === "online" && b.status === "pending" && !b.subscription && (
                         <span className="mr-2 inline-flex items-center text-xs font-semibold text-amber-700">Awaiting approval</span>
                       )}
-                      {b.payment?.method === "online" && b.status === "declined" && (
+                      {b.payment?.method === "online" && b.status === "declined" && !b.subscription && (
                         <span className="mr-2 inline-flex items-center text-xs font-semibold text-danger">Not approved</span>
                       )}
                       {b.status === "worked" && !b.archivedAt && !reviewedBookingIds.has(b.id) && (
@@ -255,6 +300,45 @@ export default function BookingsPage() {
                       )}
                     </td>
                   </tr>
+                  {b.subscription && (
+                    <tr key={`${b.id}-sub`}>
+                      <td colSpan="7" className="!bg-brand-light/40">
+                        <div className="flex flex-wrap items-center gap-x-8 gap-y-3 py-1">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] uppercase tracking-wide font-semibold text-brand">Monthly booking</span>
+                              <StatusBadge status={subscriptionStatusInfo(b.subscription).status} />
+                            </div>
+                            <div className="mt-1 text-sm font-semibold text-ink">{subscriptionTerm(b.subscription)}</div>
+                            <div className="text-xs text-muted">{subscriptionProgress(b.subscription)}</div>
+                            {subscriptionPeriodText(b.subscription) && (
+                              <div className="text-xs text-muted">Billing period: {subscriptionPeriodText(b.subscription)}</div>
+                            )}
+                          </div>
+                          <div>
+                            <span className="block text-[11px] uppercase tracking-wide font-semibold text-brand">Monthly price</span>
+                            <div className="text-lg font-extrabold text-brand-dark">
+                              {subscriptionMonthlyPriceCents(b.subscription) != null
+                                ? `${moneyCents(subscriptionMonthlyPriceCents(b.subscription))}`
+                                : money(b.price)}
+                              <span className="ml-1 text-xs font-normal text-muted">/ month</span>
+                            </div>
+                          </div>
+                          {subscriptionGuidance(b.subscription) && (
+                            <div className="max-w-xs text-xs leading-relaxed text-muted">{subscriptionGuidance(b.subscription)}</div>
+                          )}
+                          <div className="ml-auto">
+                            {canPayNow(b) && (
+                              <button className="btn btn-primary btn-sm" disabled={paying === b.id} onClick={() => paySubscription(b.id)}>
+                                <CalendarPlus size={14} /> {paying === b.id ? "Opening checkout…" : "Pay Now"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

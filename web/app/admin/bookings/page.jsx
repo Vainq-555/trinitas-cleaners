@@ -13,6 +13,13 @@ import StatusBadge from "@/components/StatusBadge";
 import { api, fmtDate, money, moneyCents } from "@/lib/api";
 import { cashActionsFor, classifyCashError, collectPayload } from "@/lib/cashAdmin";
 import { BOOKING_TABS, DEFAULT_TAB, EMPTY_STATE_TEXT, filterBySession, countBySession } from "@/lib/bookingsTabs";
+import {
+  subscriptionStatusInfo,
+  subscriptionTerm,
+  subscriptionProgress,
+  subscriptionMonthlyPriceCents,
+  subscriptionPeriodText,
+} from "@/lib/subscriptions";
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -157,7 +164,7 @@ export default function AdminBookingsPage() {
             <table className="table">
               <thead>
                 <tr>
-                   <th>Customer</th><th>Service</th><th>Date</th><th>Total</th><th>Payment</th><th>Note</th><th>Status</th><th className="text-right">Actions</th>
+                   <th>Customer</th><th>Service</th><th>Date</th><th>Total</th><th>Payment</th><th>Subscription</th><th>Note</th><th>Status</th><th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -167,7 +174,9 @@ export default function AdminBookingsPage() {
                       <div className="font-semibold text-ink">{b.customer.name}</div>
                       <div className="text-xs text-muted">{b.customer.email}</div>
                     </td>
-                    <td>{b.service.name}</td>
+                    <td>{b.service.name}{b.subscription && (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand">Monthly</span>
+                      )}</td>
                     <td className="text-muted">{fmtDate(b.date)}</td>
                     <td className="font-semibold">
                       {b.payment?.method === "cash" ? (
@@ -195,8 +204,29 @@ export default function AdminBookingsPage() {
                       {b.payment?.paidAt && <div className="text-muted">{new Date(b.payment.paidAt).toLocaleString()}</div>}
                       {b.payment?.stripeCheckoutSessionId && <div className="max-w-[130px] truncate text-muted" title={b.payment.stripeCheckoutSessionId}>{b.payment.stripeCheckoutSessionId}</div>}
                       {b.payment?.stripePaymentIntentId && <div className="max-w-[130px] truncate text-muted" title={b.payment.stripePaymentIntentId}>{b.payment.stripePaymentIntentId}</div>}
-                    </td>
-                    <td className="text-xs text-muted max-w-[180px] truncate">{b.note || "—"}</td>
+                      </td>
+                      <td className="align-top text-[11px]">
+                        {b.subscription ? (
+                          <div className="space-y-1">
+                            <StatusBadge status={subscriptionStatusInfo(b.subscription).status} />
+                            <div className="font-semibold text-ink">{subscriptionTerm(b.subscription)}</div>
+                            <div className="text-muted">{subscriptionProgress(b.subscription)}</div>
+                            {subscriptionMonthlyPriceCents(b.subscription) != null && (
+                              <div className="font-semibold text-brand">{moneyCents(subscriptionMonthlyPriceCents(b.subscription))}<span className="font-normal text-muted"> / month</span></div>
+                            )}
+                            {subscriptionPeriodText(b.subscription) && <div className="text-muted">Period: {subscriptionPeriodText(b.subscription)}</div>}
+                            {b.subscription.cancelAtPeriodEnd && (
+                              <div className="text-amber-700 font-semibold">Cancel at period end</div>
+                            )}
+                            {b.subscription.finalCancelPending && !b.subscription.finalCancelConfirmedAt && (
+                              <div className="text-amber-700 font-semibold">Final cancel pending</div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted">—</span>
+                        )}
+                      </td>
+                      <td className="text-xs text-muted max-w-[180px] truncate">{b.note || "—"}</td>
                     <td><StatusBadge status={b.status} /></td>
                     <td className="text-right">
                       <div className="flex justify-end gap-2">

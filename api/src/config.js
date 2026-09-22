@@ -25,6 +25,19 @@ export const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 export const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 export const PUBLIC_WEB_URL = process.env.PUBLIC_WEB_URL || "http://localhost:3000";
 
+// Stripe secret-key mode gate. A key is usable only when its mode matches the
+// environment: live keys (sk_live_) in production only, test keys (sk_test_) in
+// non-production only. Any other key (or none) yields null, so no Stripe call
+// can ever be made with an invalid key, test environments can never charge
+// live Stripe, and production can never accidentally run in test mode. The
+// optional `key` argument exists purely so unit tests can exercise every mode.
+export function stripeSecretKeyMode(key = STRIPE_SECRET_KEY) {
+  const production = process.env.NODE_ENV === "production";
+  if (production && typeof key === "string" && key.startsWith("sk_live_")) return "live";
+  if (!production && typeof key === "string" && key.startsWith("sk_test_")) return "test";
+  return null;
+}
+
 // Email delivery (password recovery). RESEND_API_KEY and EMAIL_FROM must be set
 // in production; see api/.env.example. These value NAMES are committed, never
 // the secrets themselves.

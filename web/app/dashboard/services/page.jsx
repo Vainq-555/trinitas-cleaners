@@ -9,9 +9,10 @@ import {
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import ServiceCard from "@/components/ServiceCard";
-import { api, money } from "@/lib/api";
+import { api, money, moneyCents } from "@/lib/api";
 import { useMyLocation } from "@/lib/geo";
 import { filterSectionsForService } from "@/lib/serviceContent";
+import { SUBSCRIPTION_TERM_MAX_MONTHS } from "@/lib/subscriptions";
 
 const links = [
   { href: "/dashboard", label: "Overview", icon: Home },
@@ -39,6 +40,10 @@ export default function ServicesPage() {
   const [address, setAddress] = useState({ line1: "", city: "", state: "", postalCode: "", country: "US" });
   const [promoCode, setPromoCode] = useState("");
   const [serviceSteps, setServiceSteps] = useState([]);
+  // Monthly (superscript "Book for Month") booking state. Only active when the
+  // selected service's backend row says monthly booking is available.
+  const [bookingKind, setBookingKind] = useState("one-time");
+  const [months, setMonths] = useState(1);
 
   useEffect(() => {
     api("/services").then((d) => setServices(d.services)).catch(() => {});
@@ -87,20 +92,37 @@ export default function ServicesPage() {
     }
   };
 
+  // Whether a service offers monthly ("Book for Month") booking, per its
+  // backend row (monthlyActive + an integer monthlyPriceCents).
+  const monthlyAvailable = (s) =>
+    Boolean(s?.monthlyActive) && Number.isInteger(s?.monthlyPriceCents) && s.monthlyPriceCents >= 0;
+
   const book = async (e) => {
     e.preventDefault();
+    const isMonthly = bookingKind === "monthly" && monthlyAvailable(selected);
     setBusy(true);
     setError("");
     setOk("");
     try {
-      await api("/bookings", { method: "POST", body: { serviceId: selected.id, date, note, paymentMethod, promoCode: promoCode.trim() || undefined, serviceAddress: address } });
-      setOk(paymentMethod === "online"
-        ? "Booking submitted. Your booking is awaiting approval. You'll be able to pay once it is approved."
-        : "Booking requested! We'll confirm shortly.");
+      if (isMonthly) {
+        await api("/bookings/subscription", {
+          method: "POST",
+          body: { serviceId: selected.id, date, note, months, serviceAddress: address },
+        });
+        setOk("Monthly booking submitted! Your booking is awaiting approval. Once approved, you'll pay online to start your monthly service.");
+      } else {
+        await api("/bookings", { method: "POST", body: { serviceId: selected.id, date, note, paymentMethod, promoCode: promoCode.trim() || undefined, serviceAddress: address } });
+        setOk(paymentMethod === "online"
+          ? "Booking submitted. Your booking is awaiting approval. You'll be able to pay once it is approved."
+          : "Booking requested! We'll confirm shortly.");
+      }
       setSelected(null);
       setDate("");
       setNote("");
       setPaymentMethod("cash");
+      setBookingKind("one-time");
+      setMonths(1);
+      setPromoCode("");
       setTimeout(() => router.push("/dashboard/bookings"), 1200);
     } catch (err) {
       setError(err.message);
@@ -177,6 +199,46 @@ export default function ServicesPage() {
             )}
 
              <form onSubmit={book} className="mt-5 space-y-4">
+              {monthlyAvailable(selected) && (
+                <div>
+                  <label className="label">Booking type</label>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className={`cursor-pointer rounded-xl border px-4 py-3 ${bookingKind === "one-time" ? "border-brand bg-brand-light" : "border-line"}`}>
+                      <input className="mr-2" type="radio" name="bookingKind" value="one-time" checked={bookingKind === "one-time"} onChange={() => setBookingKind("one-time")} />
+                      <span className="font-semibold text-ink">Book once</span>
+                      <span className="block pl-6 text-xs text-muted">One-time service on your chosen date</span>
+                    </label>
+                    <label className={`cursor-pointer rounded-xl border px-4 py-3 ${bookingKind === "monthly" ? "border-brand bg-brand-light" : "border-line"}`}>
+                      <input className="mr-2" type="radio" name="bookingKind" value="monthly" checked={bookingKind === "monthly"} onChange={() => setBookingKind("monthly")} />
+                      <span className="font-semibold text-ink">Book for Month</span>
+                      <span className="block pl-6 text-xs text-muted">Recurring monthly service, online payment</span>
+                    </label>
+                  </div>
+                  {bookingKind === "monthly" && (
+                    <div className="mt-3 rounded-xl border border-brand-soft bg-brand-light/50 px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                        <div>
+                          <span className="block text-[11px] uppercase tracking-wide font-semibold text-brand">Monthly price</span>
+                          <span className="text-xl font-extrabold text-brand-dark">{moneyCents(selected.monthlyPriceCents)}</span>
+                          <span className="ml-1 text-xs text-muted">per month</span>
+                        </div>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-clean px-3 py-1 text-[11px] font-bold text-white">
+                          <BadgePercent size={12} /> Online payment only
+                        </span>
+                      </div>
+                      <div className="mt-3">
+                        <label className="label">How many months?</label>
+                        <select className="input" value={months} onChange={(e) => setMonths(Number(e.target.value))}>
+                          {[...Array(SUBSCRIPTION_TERM_MAX_MONTHS)].map((_, i) => i + 1).map((m) => (
+                            <option key={m} value={m}>{m} month{m > 1 ? "s" : ""}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <p className="mt-2 text-xs text-muted">Billed every month, online only. Your first month starts after your payment is confirmed.</p>
+                    </div>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="label">Service address (used for sales tax)</label>
                 <div className="space-y-2">
@@ -204,27 +266,31 @@ export default function ServicesPage() {
                 <textarea className="textarea" value={note} onChange={(e) => setNote(e.target.value)}
                   placeholder="e.g. 12 windows, two stories, back door access" />
               </div>
-              <div>
-                <label className="label">Promotion code (optional)</label>
-                <input className="input" value={promoCode} onChange={(e) => setPromoCode(e.target.value)} placeholder="Enter a code" />
-              </div>
-              <div>
-                <label className="label">Payment method</label>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <label className={`cursor-pointer rounded-xl border px-4 py-3 ${paymentMethod === "online" ? "border-brand bg-brand-light" : "border-line"}`}>
-                    <input className="mr-2" type="radio" name="paymentMethod" value="online" checked={paymentMethod === "online"} onChange={(e) => setPaymentMethod(e.target.value)} />
-                    <span className="font-semibold text-ink">Pay online</span>
-                    <span className="block pl-6 text-xs text-muted">Secure Stripe Checkout after approval</span>
-                  </label>
-                  <label className={`cursor-pointer rounded-xl border px-4 py-3 ${paymentMethod === "cash" ? "border-brand bg-brand-light" : "border-line"}`}>
-                    <input className="mr-2" type="radio" name="paymentMethod" value="cash" checked={paymentMethod === "cash"} onChange={(e) => setPaymentMethod(e.target.value)} />
-                    <span className="font-semibold text-ink">Pay with cash</span>
-                    <span className="block pl-6 text-xs text-muted">Pay after service</span>
-                  </label>
+              {bookingKind !== "monthly" && (
+                <div>
+                  <label className="label">Promotion code (optional)</label>
+                  <input className="input" value={promoCode} onChange={(e) => setPromoCode(e.target.value)} placeholder="Enter a code" />
                 </div>
-              </div>
+              )}
+              {bookingKind !== "monthly" && (
+                <div>
+                  <label className="label">Payment method</label>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className={`cursor-pointer rounded-xl border px-4 py-3 ${paymentMethod === "online" ? "border-brand bg-brand-light" : "border-line"}`}>
+                      <input className="mr-2" type="radio" name="paymentMethod" value="online" checked={paymentMethod === "online"} onChange={(e) => setPaymentMethod(e.target.value)} />
+                      <span className="font-semibold text-ink">Pay online</span>
+                      <span className="block pl-6 text-xs text-muted">Secure Stripe Checkout after approval</span>
+                    </label>
+                    <label className={`cursor-pointer rounded-xl border px-4 py-3 ${paymentMethod === "cash" ? "border-brand bg-brand-light" : "border-line"}`}>
+                      <input className="mr-2" type="radio" name="paymentMethod" value="cash" checked={paymentMethod === "cash"} onChange={(e) => setPaymentMethod(e.target.value)} />
+                      <span className="font-semibold text-ink">Pay with cash</span>
+                      <span className="block pl-6 text-xs text-muted">Pay after service</span>
+                    </label>
+                  </div>
+                </div>
+              )}
               <button className="btn btn-primary w-full !py-3" disabled={busy}>
-                {busy ? "Requesting…" : "Request booking"}
+                {busy ? "Requesting…" : bookingKind === "monthly" ? "Submit monthly booking" : "Request booking"}
               </button>
             </form>
           </div>

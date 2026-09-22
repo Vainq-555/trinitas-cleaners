@@ -19,6 +19,7 @@ import * as payments from "../controllers/payments.js";
 import * as promotions from "../controllers/promotions.js";
 import * as reconciliation from "../controllers/reconciliation.js";
 import * as cashPayments from "../controllers/cashPayments.js";
+import * as subscriptions from "../controllers/subscriptions.js";
 import * as geocode from "../controllers/geocode.js";
 
 const router = Router();
@@ -46,7 +47,10 @@ router.delete("/auth/account", authenticate, auth.deleteAccount);
 // ---------- Customer ----------
 router.get("/bookings", authenticate, requireCustomer, bookings.listMyBookings);
 router.post("/bookings", authenticate, requireCustomer, bookings.createBooking);
+router.post("/bookings/subscription", authenticate, requireCustomer, subscriptions.createSubscriptionBooking);
 router.post("/bookings/:id/checkout", authenticate, requireCustomer, payments.createCheckout);
+router.post("/bookings/:id/subscription/checkout", authenticate, requireCustomer, subscriptions.subscriptionCheckout);
+router.post("/bookings/:id/subscription/cancel", authenticate, requireCustomer, subscriptions.cancelSubscription);
 router.delete("/bookings/:id", authenticate, bookings.deleteBooking);
 
 router.get("/geocode/reverse", authenticate, requireCustomer, geocode.reverseGeocode);

@@ -9,7 +9,7 @@ MessageCircle,
   UsersRound,
 } from "lucide-react";
 import Shell from "@/components/Shell";
-import { api, fmtDate } from "@/lib/api";
+import { api, fmtDate, moneyCents } from "@/lib/api";
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -186,16 +186,28 @@ export default function ServicesPage() {
         <div className="overflow-x-auto">
           <table className="table">
             <thead>
-              <tr><th>Service</th><th>Description</th><th>Base price</th><th>Status</th><th>Created</th><th className="text-right">Actions</th></tr>
+              <tr><th>Service</th><th>Description</th><th>Base price</th><th>Monthly</th><th>Status</th><th>Created</th><th className="text-right">Actions</th></tr>
             </thead>
             <tbody>
               {services.length === 0 ? (
-                <tr><td colSpan="6"><div className="empty-state"><Wrench size={36} className="mx-auto text-slate-300" /><p className="mt-3 font-semibold text-ink">No services found.</p></div></td></tr>
+                <tr><td colSpan="7"><div className="empty-state"><Wrench size={36} className="mx-auto text-slate-300" /><p className="mt-3 font-semibold text-ink">No services found.</p></div></td></tr>
               ) : services.map((service) => (
                 <tr key={service.id}>
                   <td className="font-semibold text-ink">{service.name}</td>
                   <td className="text-sm text-muted max-w-[320px]">{service.description || "-"}</td>
                   <td className="font-semibold text-brand whitespace-nowrap">{Number(service.basePrice).toLocaleString("en-US", { style: "currency", currency: "USD" })}</td>
+                  <td className="whitespace-nowrap">
+                    {service.monthlyActive && Number.isInteger(service.monthlyPriceCents) && service.monthlyPriceCents >= 0 ? (
+                      <div className="space-y-1">
+                        <span className="font-semibold text-brand">{moneyCents(service.monthlyPriceCents)}<span className="font-normal text-muted"> / month</span></span>
+                        <span className="ml-1 inline-flex items-center gap-1.5 rounded-full bg-okbg px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-clean-dark border border-green-200">
+                          <span className="h-1.5 w-1.5 rounded-full bg-clean" /> Monthly on
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted">Not offered</span>
+                    )}
+                  </td>
                   <td>
                     {service.isActive ? (
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-okbg px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-clean-dark border border-green-200"><span className="h-1.5 w-1.5 rounded-full bg-clean" /> Active</span>

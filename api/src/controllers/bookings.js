@@ -10,6 +10,12 @@ import { normalizeServiceAddress } from "../utils/serviceAddress.js";
 const bookingInclude = {
   service: true,
   payment: true,
+  // Exposes the linked monthly Subscription (when this booking is the request
+  // lane of a monthly booking) so customer and admin booking lists can display
+  // the subscription's own status, term, monthly price snapshot and
+  // cancellation state. Present (non-null) only for monthly bookings; one-time
+  // bookings have null here. Additive read-only include — no business logic.
+  subscription: true,
   customer: {
     select: { id: true, name: true, email: true, phone: true, address: true },
   },
@@ -178,6 +184,16 @@ export async function adminSetBookingStatus(req, res) {
   if (!booking) return res.status(404).json({ error: "Booking not found" });
 
   const updated = await prisma.booking.update({ where: { id }, data: { status } });
+
+  // Monthly subscription: reflect the admin decision on the linked Subscription
+  // (accepted = ready for the customer's explicit "Pay Now"; declined = rejected).
+  // No Stripe objects are created here.
+  if (status === "accepted" || status === "declined") {
+    const subscription = await prisma.subscription.findUnique({ where: { bookingId: id } });
+    if (subscription) {
+      await prisma.subscription.update({ where: { id: subscription.id }, data: { status } });
+    }
+  }
 
   // Notify the customer of the decision.
   await prisma.broadcast.create({

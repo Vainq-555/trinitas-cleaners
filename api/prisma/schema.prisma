@@ -32,6 +32,18 @@ model User {
   // NULL means the customer may post. Admins clear it to unblock.
   communityBlockedAt DateTime?
 
+  // Stripe Customer identity — the SINGLE source of truth for the customer's
+  // recurring-billing identity. NULL until the customer ever pays via "Pay Now"
+  // (created lazily by the API after admin accept, never at booking submit).
+  stripeCustomerId String? @unique
+
+  // Stripe Customer identity — the SINGLE source of truth for the customer's
+  // recurring-billing identity. NULL until the customer ever pays via "Pay Now"
+  // (the Stripe Customer is created LAZILY by the API after admin accept, never
+  // at booking submit). Do NOT duplicate this on Subscription and do NOT add a
+  // StripeCustomer model — User.stripeCustomerId is it.
+
+  subscriptions Subscription[]
   bookings         Booking[]
   receipts         Receipt[]
   reviews          Review[]
@@ -58,11 +70,20 @@ model Service {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
-  bookings         Booking[]
-  customPrices     CustomPrice[]
-  promotions       PromotionService[]
-  contentSections  ContentSection[]
-  reviews          Review[]
+  // Monthly recurring billing (approved Option B — true Stripe subscription).
+  // monthlyPriceCents is the GLOBAL monthly price in USD cents; NULL means
+  // monthly billing is not offered on this service. monthlyActive turns the
+  // monthly offer on/off. Per-customer overrides live on CustomPrice
+  // (monthlyPriceCents); a non-NULL override always wins over the global value.
+  monthlyPriceCents Int?
+  monthlyActive     Boolean  @default(false)
+
+  subscriptions  Subscription[]
+  bookings       Booking[]
+  customPrices   CustomPrice[]
+  promotions     PromotionService[]
+  contentSections ContentSection[]
+  reviews        Review[]
 }
 
 // Per-customer price override. Existence of a row overrides basePrice for
@@ -72,6 +93,11 @@ model CustomPrice {
   serviceId  String
   customerId String
   price      Float
+
+  // Per-customer monthly price override (cents). NULL = use the Service-level
+  // global monthlyPriceCents. Two-lane override separate from the one-time
+  // legacy Float override above.
+  monthlyPriceCents Int?
 
   service  Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   customer User    @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -110,14 +136,20 @@ model Booking {
   promotionNameSnapshot          String?
   promotionDiscountTypeSnapshot  String?
   promotionDiscountValueSnapshot Int?
-  promotionUsageClaimedAt        DateTime?
+  promotionUsageClaimedAt  DateTime?
 
-  customer User      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
   service  Service   @relation(fields: [serviceId], references: [id])
   receipts Receipt[]
   payment   Payment?
   review    Review?
   promotion Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
+
+  // Optional back-reference to the subscription this booking originated (the
+  // request booking lane). The Subscription owns bookingId — Booking does NOT
+  // own subscriptionId.
+  subscription Subscription?
+  subscriptionBookings SubscriptionBooking[]
 
   @@index([customerId])
   @@index([promotionId])
@@ -145,6 +177,8 @@ model Payment {
   amountPaidCents         Int?
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  subscriptionPayment SubscriptionPayment?
 
   @@index([status])
   @@index([method])
@@ -458,4 +492,115 @@ model PasswordResetToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Recurring monthly billing (approved Option B — a TRUE per-service Stripe
+// subscription, not a schedule of static one-time bookings).
+//
+// Identity: the Stripe Customer is User.stripeCustomerId ONLY (single source,
+// created lazily by the API after admin accept, never at booking submit) — it is
+// NOT duplicated here and no StripeCustomer model exists backgroundColor.
+//
+// Model shape:
+//   Subscription            — one recurring agreement (customer × service).
+//   SubscriptionBooking     — one PAID month lane on that subscription (1:1 with
+//                             the Booking that that month's payment covers).
+//   SubscriptionPayment     — the Payment that paid one month's invoice
+//                             (Payment.subscriptionPayment -> this, 1:1).
+//
+// Period-based billing uses the Booking PERIOD, not calendar months, so a
+// subscription never double-bills the struck period the customer actually paid.
+// ---------------------------------------------------------------------------
+
+// One recurring billing agreement between a customer and a service. A row is
+// created only after the admin ACCEPTS the subscription-request booking (the
+// Stripe subscription itself is created lazily at first "Pay Now"). Cancellations
+// are a status transition, never a delete — see finalCancelPending /
+// finalCancelPendingAt / finalCancelConfirmedAt (the admin-facing "final cancel"
+// confirmation gates the destructive/period-finalizing cancel).
+model Subscription {
+  id                     String    @id @default(cuid())
+  customerId             String
+  serviceId              String
+  bookingId              String    @unique
+  months                 Int
+  monthCompleted         Int       @default(0)
+  status                 String    @default("pending")
+  // Monthly price LOCKED at signup (USD cents): the Service/CustomPrice override
+  // winner at the moment the subscription was created (never recomputed later).
+  monthlyPriceCents      Int
+  // Stripe recurring-billing identity; NULL until first "Pay Now" (created lazily).
+  stripeSubscriptionId   String?   @unique
+  stripePriceId          String?   @unique
+  // Webhook-dedup guard, owned by the Subscription (not SubscriptionPayment).
+  idempotencyKey         String    @unique
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean   @default(false)
+  // Final-cancel gate (admin confirmation). Pending = cancellation is authorized
+  // but the period in progress still completes; ConfirmedAt = the period was
+  // finalized and the subscription may be stripped of stripes/lanes.
+  finalCancelPending       Boolean   @default(false)
+  finalCancelPendingAt     DateTime?
+  finalCancelConfirmedAt   DateTime?
+  canceledAt               DateTime?
+  completedAt              DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  // The request booking that created this subscription (the "fresh" booking
+  // lane). Subscription owns bookingId — Booking does NOT own subscriptionId.
+  // Each paid MONTH lives on bookings (SubscriptionBooking) instead.
+  booking                Booking                  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  customer               User                     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  service                Service                  @relation(fields: [serviceId], references: [id])
+  bookings               SubscriptionBooking[]
+  payments               SubscriptionPayment[]
+
+  @@index([customerId])
+  @@index([serviceId])
+  @@index([status])
+}
+
+// One paid month of a Subscription, 1:1 with the Booking that that month's
+// payment actually covered. periodIndex is 1-based within the subscription, so
+// [subscriptionId, periodIndex] is unique. Cents snapshots live on the Booking;
+// this row only links a booked month to its subscription (and its Payment via
+// SubscriptionPayment).
+model SubscriptionBooking {
+  id              String   @id @default(cuid())
+  subscriptionId  String
+  bookingId       String   @unique
+  periodIndex     Int
+  periodStart     DateTime
+  periodEnd       DateTime
+  stripeInvoiceId String?  @unique
+  createdAt       DateTime @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, periodIndex])
+  @@index([subscriptionId])
+}
+
+// The Payment (Payment.subscriptionPayment, 1:1) that paid one month on a
+// Subscription. One row lands per paid period; the idempotencyKey webhook-dedup
+// guard lives on the owning Subscription, not here.
+model SubscriptionPayment {
+  id              String   @id @default(cuid())
+  subscriptionId  String
+  paymentId       String   @unique
+  periodIndex     Int
+  stripeInvoiceId String?  @unique
+  status          String   @default("paid")
+  refundedAt      DateTime?
+  createdAt       DateTime @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  payment      Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, periodIndex])
+  @@index([subscriptionId])
 }
