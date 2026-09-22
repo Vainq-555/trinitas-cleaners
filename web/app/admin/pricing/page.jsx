@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, Save, UserRound, BadgePercent, Globe, X, Wrench, BookOpen, Store,
+  MessageSquare, Megaphone, Star, Save, UserRound, BadgePercent, CalendarClock, Globe, X, Wrench, BookOpen, Store,
 MessageCircle,
   UsersRound,
 } from "lucide-react";
 import Shell from "@/components/Shell";
-import { api, moneyCents } from "@/lib/api";
+import { api } from "@/lib/api";
+import { centsToDollars, customerMonthlyBody, customerMonthlyClearBody, globalMonthlyBody } from "@/lib/pricing";
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -36,12 +37,18 @@ export default function PricingPage() {
   const [customerId, setCustomerId] = useState(preselect || "");
   const [globalDrafts, setGlobalDrafts] = useState({});
   const [customerDrafts, setCustomerDrafts] = useState({});
+  const [monthlyGlobalDrafts, setMonthlyGlobalDrafts] = useState({});
+  const [monthlyActiveDrafts, setMonthlyActiveDrafts] = useState({});
+  const [customerMonthlyDrafts, setCustomerMonthlyDrafts] = useState({});
   const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const load = async () => {
     const d = await api("/services").catch(() => ({ services: [] }));
     setServices(d.services);
     setGlobalDrafts(Object.fromEntries(d.services.map((s) => [s.id, s.basePrice])));
+    setMonthlyGlobalDrafts(Object.fromEntries(d.services.map((s) => [s.id, centsToDollars(s.monthlyPriceCents)])));
+    setMonthlyActiveDrafts(Object.fromEntries(d.services.map((s) => [s.id, Boolean(s.monthlyActive)])));
     const c = await api("/admin/users").catch(() => ({ users: [] }));
     setCustomers(c.users);
   };
@@ -53,6 +60,7 @@ export default function PricingPage() {
   useEffect(() => {
     if (!customerId) {
       setCustomerDrafts({});
+      setCustomerMonthlyDrafts({});
       return;
     }
     api(`/admin/users/${customerId}`)
@@ -84,7 +92,49 @@ export default function PricingPage() {
     load();
   };
 
+  const saveMonthlyGlobal = async (id) => {
+    const active = Boolean(monthlyActiveDrafts[id]);
+    const body = globalMonthlyBody(monthlyGlobalDrafts[id], active);
+    if (!body) return alert(active ? "Enter a valid monthly price." : "Enter a valid price.");
+    setBusy(true);
+    try {
+      await api(`/admin/services/${id}/price/global`, { method: "PUT", body });
+      setMsg("Monthly pricing updated for all customers.");
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveCustomerMonthly = async (id) => {
+    const body = customerMonthlyBody(customerId, customerMonthlyDrafts[id]);
+    if (!body) return alert("Enter a valid monthly price.");
+    setBusy(true);
+    try {
+      await api(`/admin/services/${id}/price/customer`, { method: "PUT", body });
+      setMsg("Monthly price updated for this customer only.");
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearCustomerMonthly = async (id) => {
+    const body = customerMonthlyClearBody(customerId);
+    if (!body) return;
+    setBusy(true);
+    try {
+      await api(`/admin/services/${id}/price/customer`, { method: "PUT", body });
+      setMsg("Monthly override cleared — customer now pays the global monthly price.");
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const selectedCustomer = customers.find((c) => c.id === customerId);
+  const monthlyOn = (s) =>
+    Boolean(s.monthlyActive) && Number.isInteger(s.monthlyPriceCents) && s.monthlyPriceCents >= 0;
 
   return (
     <Shell links={links} sections={["Admin Portal"]} title="Pricing Control"
@@ -126,7 +176,8 @@ export default function PricingPage() {
                 <th>Service</th>
                 <th><Globe size={12} className="inline -mt-0.5 mr-1" />Global base price</th>
                 <th><UserRound size={12} className="inline -mt-0.5 mr-1" />Per-customer price</th>
-                <th>Monthly price (per month)</th>
+                <th><CalendarClock size={12} className="inline -mt-0.5 mr-1" />Global monthly</th>
+                <th><UserRound size={12} className="inline -mt-0.5 mr-1" />Customer monthly override</th>
                 <th className="text-right">Override</th>
               </tr>
             </thead>
@@ -170,15 +221,49 @@ export default function PricingPage() {
                       )}
                     </td>
                     <td>
-                      {s.monthlyActive && Number.isInteger(s.monthlyPriceCents) && s.monthlyPriceCents >= 0 ? (
-                        <div className="space-y-1">
-                          <div className="font-semibold text-brand whitespace-nowrap">{moneyCents(s.monthlyPriceCents)}<span className="font-normal text-muted"> / month</span></div>
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-okbg px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-clean-dark border border-green-200">
-                            <span className="h-1.5 w-1.5 rounded-full bg-clean" /> Monthly booking on
-                          </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400">$</span>
+                        <input className="input !w-24 !px-2 !py-1.5 text-sm" type="number" step="0.01" min="0"
+                          placeholder={centsToDollars(s.monthlyPriceCents) || "0.00"}
+                          value={monthlyGlobalDrafts[s.id] ?? ""}
+                          onChange={(e) => setMonthlyGlobalDrafts({ ...monthlyGlobalDrafts, [s.id]: e.target.value })} />
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                        <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink">
+                          <input type="checkbox" checked={Boolean(monthlyActiveDrafts[s.id])}
+                            onChange={(e) => setMonthlyActiveDrafts({ ...monthlyActiveDrafts, [s.id]: e.target.checked })} />
+                          Monthly Active
+                        </label>
+                        <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => saveMonthlyGlobal(s.id)}>
+                          <Save size={13} /> Save Monthly
+                        </button>
+                      </div>
+                      {monthlyOn(s) ? (
+                        <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-okbg px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-clean-dark border border-green-200">
+                          <span className="h-1.5 w-1.5 rounded-full bg-clean" /> Monthly booking on
+                        </span>
+                      ) : (
+                        <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                          Monthly booking off
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {customerId ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-400">$</span>
+                          <input className="input !w-24 !px-2 !py-1.5 text-sm" type="number" step="0.01" min="0"
+                            placeholder="0.00" value={customerMonthlyDrafts[s.id] ?? ""}
+                            onChange={(e) => setCustomerMonthlyDrafts({ ...customerMonthlyDrafts, [s.id]: e.target.value })} />
+                          <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => saveCustomerMonthly(s.id)}>
+                            Set
+                          </button>
+                          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => clearCustomerMonthly(s.id)} title="Clear monthly override">
+                            <X size={13} />
+                          </button>
                         </div>
                       ) : (
-                        <span className="text-xs text-muted">Not offered</span>
+                        <span className="text-xs text-muted">Select a customer above</span>
                       )}
                     </td>
                     <td className="text-right">
@@ -200,8 +285,9 @@ export default function PricingPage() {
       <p className="mt-4 text-xs text-muted">
         Global price changes affect the public site and all customer accounts immediately.
         Per-customer overrides affect only the selected account.
-        The monthly column shows the per-service monthly price (billed every month) for
-        services with monthly booking enabled.
+        "Global monthly" sets the monthly subscription price (billed every month) and whether
+        monthly booking is offered. "Customer monthly override" sets a
+        per-customer monthly price; clearing it keeps the one-time override.
       </p>
     </Shell>
   );
