@@ -148,7 +148,18 @@ export async function deleteBooking(req, res) {
 
 export async function listMyBookings(req, res) {
   const bookings = await prisma.booking.findMany({
-    where: { customerId: req.user.id, archivedAt: null },
+    where: {
+      customerId: req.user.id,
+      archivedAt: null,
+      // Hide paid monthly-period bookings (the SubscriptionBooking-backed lanes
+      // created by invoice.paid). They remain in the database for
+      // bookkeeping/receipts, but the customer's "My Bookings" list shows only
+      // the original monthly request booking (carries Booking.subscription) and
+      // normal one-time bookings. The exclusion specifically targets the
+      // SubscriptionBooking relation, NOT `subscription: null` — one-time and
+      // month-lane bookings both have subscription = null.
+      NOT: { subscriptionBookings: { some: {} } },
+    },
     orderBy: { createdAt: "desc" },
     include: bookingInclude,
   });
