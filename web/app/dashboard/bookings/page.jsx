@@ -260,9 +260,6 @@ export default function BookingsPage() {
                     <td className="text-muted">{fmtDate(b.date)}</td>
                     <td>
                       <StatusBadge status={b.status} />
-                      {b.subscription && subscriptionStatusInfo(b.subscription).status && (
-                        <div className="mt-1"><StatusBadge status={subscriptionStatusInfo(b.subscription).status} /></div>
-                      )}
                     </td>
                     <td className="font-semibold">
                       {b.payment?.method === "cash"
