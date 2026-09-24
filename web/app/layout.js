@@ -9,6 +9,7 @@ export const metadata = {
   applicationName: "Trinitas-Cleaners",
   keywords: ["window cleaning", "screen cleaning", "Anoka MN", "Trinitas-Cleaners", "cleaning service"],
   verification: {
+    google: "eNhaltCEGhusUaK0BHwTO49W_DnTwSmjerQcyTlL9fc",
     other: {
       "msvalidate.01": "A65AAD1AF7781ACDA917F2F5D6B914B5"
     },
