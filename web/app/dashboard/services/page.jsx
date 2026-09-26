@@ -38,6 +38,14 @@ export default function ServicesPage() {
   const [locating, setLocating] = useState(false);
   const [locNote, setLocNote] = useState("");
   const [address, setAddress] = useState({ line1: "", city: "", state: "", postalCode: "", country: "US" });
+  // Service location: WHERE the work is physically performed (separate from the
+  // tax-address snapshot above) plus optional instructions for the crew.
+  const [serviceLocation, setServiceLocation] = useState({ line1: "", line2: "", city: "", state: "", postalCode: "", country: "US" });
+  const [serviceLocationInstructions, setServiceLocationInstructions] = useState("");
+  // Schedule: WHEN the service should start, chosen in America/Chicago wall
+  // clock and stored by the backend as the UTC instant it represents.
+  const [scheduledStartDate, setScheduledStartDate] = useState("");
+  const [scheduledStartTime, setScheduledStartTime] = useState("");
   const [promoCode, setPromoCode] = useState("");
   const [serviceSteps, setServiceSteps] = useState([]);
   // Monthly (superscript "Book for Month") booking state. Only active when the
@@ -107,11 +115,21 @@ export default function ServicesPage() {
       if (isMonthly) {
         await api("/bookings/subscription", {
           method: "POST",
-          body: { serviceId: selected.id, date, note, months, serviceAddress: address },
+          body: {
+            serviceId: selected.id,
+            date,
+            note,
+            months,
+            serviceAddress: address,
+            serviceLocation: serviceLocation,
+            serviceLocationInstructions: serviceLocationInstructions.trim() || undefined,
+            scheduledStartDate,
+            scheduledStartTime,
+          },
         });
         setOk("Monthly booking submitted! Your booking is awaiting approval. Once approved, you'll pay online to start your monthly service.");
       } else {
-        await api("/bookings", { method: "POST", body: { serviceId: selected.id, date, note, paymentMethod, promoCode: promoCode.trim() || undefined, serviceAddress: address } });
+        await api("/bookings", { method: "POST", body: { serviceId: selected.id, date, note, paymentMethod, promoCode: promoCode.trim() || undefined, serviceAddress: address, serviceLocation: serviceLocation, serviceLocationInstructions: serviceLocationInstructions.trim() || undefined, scheduledStartDate, scheduledStartTime } });
         setOk(paymentMethod === "online"
           ? "Booking submitted. Your booking is awaiting approval. You'll be able to pay once it is approved."
           : "Booking requested! We'll confirm shortly.");
@@ -123,6 +141,10 @@ export default function ServicesPage() {
       setBookingKind("one-time");
       setMonths(1);
       setPromoCode("");
+      setServiceLocation({ line1: "", line2: "", city: "", state: "", postalCode: "", country: "US" });
+      setServiceLocationInstructions("");
+      setScheduledStartDate("");
+      setScheduledStartTime("");
       setTimeout(() => router.push("/dashboard/bookings"), 1200);
     } catch (err) {
       setError(err.message);
@@ -239,6 +261,26 @@ export default function ServicesPage() {
                   )}
                 </div>
               )}
+              <div>
+                <label className="label">Service location — where should the work be done?</label>
+                <div className="space-y-2">
+                  <input className="input" required placeholder="Street address" value={serviceLocation.line1} onChange={(e) => setServiceLocation({ ...serviceLocation, line1: e.target.value })} />
+                  <input className="input" placeholder="Address line 2 (optional)" value={serviceLocation.line2} onChange={(e) => setServiceLocation({ ...serviceLocation, line2: e.target.value })} />
+                  <div className="grid grid-cols-2 gap-2"><input className="input" required placeholder="City" value={serviceLocation.city} onChange={(e) => setServiceLocation({ ...serviceLocation, city: e.target.value })} /><input className="input" required placeholder="State" maxLength="2" value={serviceLocation.state} onChange={(e) => setServiceLocation({ ...serviceLocation, state: e.target.value })} /></div>
+                  <input className="input" required placeholder="ZIP code" value={serviceLocation.postalCode} onChange={(e) => setServiceLocation({ ...serviceLocation, postalCode: e.target.value })} />
+                  <textarea className="textarea" value={serviceLocationInstructions} onChange={(e) => setServiceLocationInstructions(e.target.value)} placeholder="Service location instructions (optional) — e.g. gate code, where to park, which entrance" />
+                </div>
+                <p className="mt-1 text-xs text-muted">This is where the crew will perform the work. We capture a separate tax address below if needed.</p>
+              </div>
+              <div>
+                <label className="label">Schedule — when should your service start?</label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input className="input" type="date" required value={scheduledStartDate}
+                    min={new Date().toISOString().slice(0, 10)} onChange={(e) => setScheduledStartDate(e.target.value)} />
+                  <input className="input" type="time" required value={scheduledStartTime} onChange={(e) => setScheduledStartTime(e.target.value)} />
+                </div>
+                <p className="mt-1 text-xs text-muted">Shown in Central Time (America/Chicago).</p>
+              </div>
               <div>
                 <label className="label">Service address (used for sales tax)</label>
                 <div className="space-y-2">

@@ -5,6 +5,7 @@ import { badRequest, isDate } from "../utils/validators.js";
 import { STRIPE_SECRET_KEY, PUBLIC_WEB_URL, stripeSecretKeyMode } from "../config.js";
 import { centsToLegacyDollars } from "../utils/money.js";
 import { normalizeServiceAddress } from "../utils/serviceAddress.js";
+import { parseScheduledStart } from "../utils/schedule.js";
 import { effectiveMonthlyPriceCents } from "./services.js";
 
 // Monthly subscriptions are a TRUE Stripe recurring subscription: the Stripe
@@ -35,7 +36,17 @@ function isInvalidTerms(months) {
 // No Stripe objects are created here: no Stripe Customer, no Stripe Price, no
 // Stripe Subscription, no Checkout. Monthly is ONLINE PAYMENT ONLY.
 export async function createSubscriptionBooking(req, res) {
-  const { serviceId, date, note, months, serviceAddress } = req.body || {};
+  const {
+    serviceId,
+    date,
+    note,
+    months,
+    serviceAddress,
+    serviceLocation,
+    serviceLocationInstructions,
+    scheduledStartDate,
+    scheduledStartTime,
+  } = req.body || {};
   if (isInvalidTerms(months)) {
     return badRequest(res, "months must be an integer from 1 through 12");
   }
@@ -62,6 +73,26 @@ export async function createSubscriptionBooking(req, res) {
   }
   const address = normalizedAddress ? normalizedAddress.address : {};
 
+  // Service location (WHERE) and schedule (WHEN): same additive, optional
+  // validation conventions as the one-time booking lane. Missing values stay
+  // valid; malformed values are rejected, not silently dropped.
+  const normalizedLocation = serviceLocation
+    ? normalizeServiceAddress(serviceLocation)
+    : null;
+  if (normalizedLocation && !normalizedLocation.ok) {
+    return badRequest(res, normalizedLocation.error);
+  }
+  const location = normalizedLocation ? normalizedLocation.address : null;
+  if (serviceLocationInstructions != null && typeof serviceLocationInstructions !== "string") {
+    return badRequest(res, "serviceLocationInstructions must be text");
+  }
+  if (typeof serviceLocationInstructions === "string" && serviceLocationInstructions.trim().length > 500) {
+    return badRequest(res, "serviceLocationInstructions must be 500 characters or fewer");
+  }
+  const schedule = parseScheduledStart({ scheduledStartDate, scheduledStartTime });
+  if (!schedule.ok) return badRequest(res, schedule.error);
+  const instructions = typeof serviceLocationInstructions === "string" ? serviceLocationInstructions.trim() || null : null;
+
   const booking = await prisma.$transaction(async (tx) => {
     return tx.booking.create({
       data: {
@@ -78,6 +109,14 @@ export async function createSubscriptionBooking(req, res) {
         taxAddressState: typeof address.state === "string" ? address.state.trim() : null,
         taxAddressPostalCode: typeof address.postalCode === "string" ? address.postalCode.trim() : null,
         taxAddressCountry: typeof address.country === "string" ? address.country.trim() : null,
+        serviceLocationAddressLine1: location ? location.line1 : null,
+        serviceLocationAddressLine2: location && location.line2 ? location.line2 : null,
+        serviceLocationCity: location ? location.city : null,
+        serviceLocationState: location ? location.state : null,
+        serviceLocationPostalCode: location ? location.postalCode : null,
+        serviceLocationCountry: location ? location.country : null,
+        serviceLocationInstructions: instructions,
+        ...(schedule.scheduledStart ? { scheduledStartAt: schedule.scheduledStart } : {}),
         payment: {
           create: { method: "online", status: "pending", amount: centsToLegacyDollars(monthlyPriceCents) },
         },

@@ -4,13 +4,14 @@ import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
   MessageSquare, Megaphone, Star, Check, X, Hammer, Inbox, CheckCircle2, ThumbsDown, BadgePercent, Wrench, BookOpen,
-  Banknote, RotateCcw, Receipt, Store,
+  Banknote, RotateCcw, Receipt, Store, Eye,
 MessageCircle,
   UsersRound,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import StatusBadge from "@/components/StatusBadge";
 import { api, fmtDate, money, moneyCents } from "@/lib/api";
+import { formatChicagoSchedule } from "@/lib/schedule";
 import { cashActionsFor, classifyCashError, collectPayload } from "@/lib/cashAdmin";
 import { BOOKING_TABS, DEFAULT_TAB, EMPTY_STATE_TEXT, filterBySession, countBySession } from "@/lib/bookingsTabs";
 import {
@@ -51,6 +52,7 @@ export default function AdminBookingsPage() {
   const [session, setSession] = useState(DEFAULT_TAB);
   const [busyId, setBusyId] = useState(null);
   const [confirm, setConfirm] = useState(null); // { booking, action: "collect" | "refund" }
+  const [details, setDetails] = useState(null); // booking detail modal (service location + schedule)
   const [notice, setNotice] = useState("");
   const [err, setErr] = useState("");
 
@@ -230,6 +232,9 @@ export default function AdminBookingsPage() {
                     <td><StatusBadge status={b.status} /></td>
                     <td className="text-right">
                       <div className="flex justify-end gap-2">
+                        <button className="btn btn-ghost btn-sm" onClick={() => setDetails(b)} title="View service location and schedule">
+                          <Eye size={14} /> Details
+                        </button>
                         {(() => {
                           const a = cashActionsFor(b);
                           if (a.canCollect) {
@@ -334,6 +339,74 @@ export default function AdminBookingsPage() {
               >
                 {busyId === confirm.booking.id ? "Working…" : confirm.action === "collect" ? `Collect ${moneyCents(confirm.booking.finalAmountCents)}` : "Confirm refund"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {details && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 px-4" role="dialog" aria-modal="true">
+          <div className="card card-pad w-full max-w-lg max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-bold text-ink">Booking details</h2>
+              <button className="btn btn-ghost btn-sm" onClick={() => setDetails(null)}><X size={14} /> Close</button>
+            </div>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div className="rounded-xl bg-slate-50 p-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted">Customer</h3>
+                <p className="mt-1 font-semibold text-ink">{details.customer.name}</p>
+                <p className="text-xs text-muted">{details.customer.email}</p>
+                {details.customer.phone && <p className="text-xs text-muted">{details.customer.phone}</p>}
+              </div>
+              <div className="rounded-xl bg-slate-50 p-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted">Service</h3>
+                <p className="mt-1 font-semibold text-ink">{details.service.name}</p>
+                <div className="mt-1"><StatusBadge status={details.status} /></div>
+                {details.subscription && (
+                  <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand">Monthly</span>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl bg-brand-light/40 p-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-brand">Schedule</h3>
+              {formatChicagoSchedule(details.scheduledStartAt) ? (
+                <div className="mt-1 text-ink">
+                  <p className="font-semibold">{formatChicagoSchedule(details.scheduledStartAt).date}</p>
+                  <p className="font-semibold">{formatChicagoSchedule(details.scheduledStartAt).time}</p>
+                  <p className="text-xs text-muted">Clock: America/Chicago</p>
+                </div>
+              ) : (
+                <p className="mt-1 text-sm text-muted">Not scheduled for a start time</p>
+              )}
+              <p className="mt-2 text-xs text-muted">Requested booking date: {fmtDate(details.date)}</p>
+            </div>
+
+            <div className="mt-4 rounded-xl bg-slate-50 p-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted">Service location</h3>
+              {details.serviceLocationAddressLine1 ? (
+                <div className="mt-1 text-sm text-ink">
+                  <p>{details.serviceLocationAddressLine1}{details.serviceLocationAddressLine2 ? `, ${details.serviceLocationAddressLine2}` : ""}</p>
+                  <p>{details.serviceLocationCity}, {details.serviceLocationState} {details.serviceLocationPostalCode}{details.serviceLocationCountry ? ` · ${details.serviceLocationCountry}` : ""}</p>
+                  {details.serviceLocationInstructions && <p className="mt-1 text-xs text-muted">{details.serviceLocationInstructions}</p>}
+                </div>
+              ) : (
+                <p className="mt-1 text-sm text-muted">Not provided for this booking</p>
+              )}
+            </div>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div className="rounded-xl bg-slate-50 p-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted">Payment</h3>
+                <p className="mt-1 text-sm font-semibold capitalize text-ink">{details.payment?.method || "—"}</p>
+                <p className={`text-xs capitalize ${details.payment?.status === "paid" ? "text-clean" : details.payment?.status === "refunded" ? "text-danger" : "text-muted"}`}>{details.payment?.status || "—"}</p>
+                {Number.isInteger(details.finalAmountCents) && <p className="mt-1 text-xs text-muted">Total: {moneyCents(details.finalAmountCents)}</p>}
+              </div>
+              <div className="rounded-xl bg-slate-50 p-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted">Notes for the crew</h3>
+                <p className="mt-1 text-sm text-ink">{details.note || "—"}</p>
+              </div>
             </div>
           </div>
         </div>

@@ -131,6 +131,24 @@ model Booking {
   taxAddressState                String?
   taxAddressPostalCode           String?
   taxAddressCountry              String?
+
+  // Dedicated booking-level SERVICE LOCATION: where the work is physically
+  // performed. Kept separate from the tax-address snapshot above. Optional
+  // (nullable) so pre-feature bookings remain valid; new bookings capture it.
+  serviceLocationAddressLine1    String?
+  serviceLocationAddressLine2    String?
+  serviceLocationCity            String?
+  serviceLocationState           String?
+  serviceLocationPostalCode      String?
+  serviceLocationCountry         String?
+  serviceLocationInstructions    String?
+
+  // Scheduled appointment start as a UTC instant, derived from the
+  // customer-chosen America/Chicago wall-clock date + time. Nullable so
+  // pre-feature bookings remain valid; the admin UI always renders it in
+  // America/Chicago regardless of the viewer's browser timezone.
+  scheduledStartAt               DateTime?
+
   promotionId                    String?
   promotionCodeSnapshot          String?
   promotionNameSnapshot          String?

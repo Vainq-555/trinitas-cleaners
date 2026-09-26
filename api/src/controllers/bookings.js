@@ -6,6 +6,7 @@ import { calculatePreTaxQuote } from "../utils/promotions.js";
 import { promotionSnapshot } from "../utils/pricing.js";
 import { claimPromotionUsage } from "../utils/promotionUsage.js";
 import { normalizeServiceAddress } from "../utils/serviceAddress.js";
+import { parseScheduledStart } from "../utils/schedule.js";
 
 const bookingInclude = {
   service: true,
@@ -24,7 +25,18 @@ const bookingInclude = {
 // ---- Customer side ----
 
 export async function createBooking(req, res) {
-  const { serviceId, date, note, paymentMethod = "cash", promoCode, serviceAddress } = req.body || {};
+  const {
+    serviceId,
+    date,
+    note,
+    paymentMethod = "cash",
+    promoCode,
+    serviceAddress,
+    serviceLocation,
+    serviceLocationInstructions,
+    scheduledStartDate,
+    scheduledStartTime,
+  } = req.body || {};
   if (!["cash", "online"].includes(paymentMethod)) {
     return badRequest(res, "paymentMethod must be cash or online");
   }
@@ -62,6 +74,26 @@ export async function createBooking(req, res) {
     return badRequest(res, normalizedAddress.error);
   }
   const address = normalizedAddress ? normalizedAddress.address : {};
+  // Service location (WHERE) and schedule (WHEN) are additive and both
+  // optional at the data layer, so pre-feature bookings and API callers that
+  // omit them remain valid. When present they are validated before persist;
+  // malformed values are rejected, not silently dropped.
+  const normalizedLocation = serviceLocation
+    ? normalizeServiceAddress(serviceLocation)
+    : null;
+  if (normalizedLocation && !normalizedLocation.ok) {
+    return badRequest(res, normalizedLocation.error);
+  }
+  const location = normalizedLocation ? normalizedLocation.address : null;
+  if (serviceLocationInstructions != null && typeof serviceLocationInstructions !== "string") {
+    return badRequest(res, "serviceLocationInstructions must be text");
+  }
+  if (typeof serviceLocationInstructions === "string" && serviceLocationInstructions.trim().length > 500) {
+    return badRequest(res, "serviceLocationInstructions must be 500 characters or fewer");
+  }
+  const schedule = parseScheduledStart({ scheduledStartDate, scheduledStartTime });
+  if (!schedule.ok) return badRequest(res, schedule.error);
+  const instructions = typeof serviceLocationInstructions === "string" ? serviceLocationInstructions.trim() || null : null;
   const snapshot = promotionSnapshot(preTaxQuote);
   let booking;
   try {
@@ -84,6 +116,14 @@ export async function createBooking(req, res) {
           taxAddressState: typeof address.state === "string" ? address.state.trim() : null,
           taxAddressPostalCode: typeof address.postalCode === "string" ? address.postalCode.trim() : null,
           taxAddressCountry: typeof address.country === "string" ? address.country.trim() : null,
+          serviceLocationAddressLine1: location ? location.line1 : null,
+          serviceLocationAddressLine2: location && location.line2 ? location.line2 : null,
+          serviceLocationCity: location ? location.city : null,
+          serviceLocationState: location ? location.state : null,
+          serviceLocationPostalCode: location ? location.postalCode : null,
+          serviceLocationCountry: location ? location.country : null,
+          serviceLocationInstructions: instructions,
+          ...(schedule.scheduledStart ? { scheduledStartAt: schedule.scheduledStart } : {}),
           payment: {
             create: { method: paymentMethod, status: paymentMethod === "cash" ? "unpaid" : "pending", amount: price },
           },
