@@ -1,4 +1,14 @@
-import { BOOKING_STATUS, BROADCAST_TARGET, BROADCAST_TYPE, REVIEW_STATUS, ROLES } from "../config.js";
+import {
+  AVAILABILITY_KIND,
+  BOOKING_STATUS,
+  BROADCAST_AUDIENCE,
+  BROADCAST_TARGET,
+  BROADCAST_TYPE,
+  COMMUNITY_AUDIENCE,
+  REVIEW_STATUS,
+  ROLES,
+} from "../config.js";
+import { isValidDateString, isValidTimeString } from "./schedule.js";
 
 export function badRequest(res, msg) {
   return res.status(400).json({ error: msg });
@@ -12,8 +22,11 @@ export function isDate(v) {
   return typeof v === "string" && !Number.isNaN(Date.parse(v));
 }
 
+// "employee" is a valid INTERNAL role, recognized here so it can be stored and
+// validated. It is never accepted from public registration: POST /auth/register
+// hard-codes ROLES.CUSTOMER, and employees are created by admins only.
 export function isValidRole(v) {
-  return v === ROLES.ADMIN || v === ROLES.CUSTOMER;
+  return v === ROLES.ADMIN || v === ROLES.CUSTOMER || v === ROLES.EMPLOYEE;
 }
 
 export function isValidBookingStatus(v) {
@@ -26,6 +39,13 @@ export function isValidBroadcastType(v) {
 
 export function isValidBroadcastTarget(v) {
   return BROADCAST_TARGET.includes(v);
+}
+
+// Phase 2B-2. An explicit audience is required before a broadcast may be created,
+// so an employee announcement can never be inferred from target = "all" and a
+// customer announcement can never be delivered to employees by omission.
+export function isValidBroadcastAudience(v) {
+  return BROADCAST_AUDIENCE.includes(v);
 }
 
 export const REVIEW_TITLE_MAX_LENGTH = 120;
@@ -124,6 +144,14 @@ export function isValidCommunityLimit(v) {
   return Number.isInteger(v) && v >= 1 && v <= COMMUNITY_LIMIT_MAX;
 }
 
+// Phase 2B-5. Which audience a community post belongs to. Validated wherever an
+// audience may be supplied by a caller (the admin surface); the employee and
+// customer controllers never take one from the request and instead pass a
+// named constant, which is why this is not on the posting path.
+export function isValidCommunityAudience(v) {
+  return COMMUNITY_AUDIENCE.includes(v);
+}
+
 // ---- Community profiles ----
 
 export const PROFILE_DISPLAY_NAME_MAX = 100;
@@ -168,4 +196,43 @@ export function isValidAvatarUrl(v) {
 
 export function isValidProfileBoolean(v) {
   return typeof v === "boolean";
+}
+
+// ---------------------------------------------------------------------------
+// Employee availability + available shifts (Phase 2B-4)
+// ---------------------------------------------------------------------------
+
+export function isValidAvailabilityKind(v) {
+  return AVAILABILITY_KIND.includes(v);
+}
+
+// An availability window is a real calendar day plus a 24-hour start/end pair
+// that is genuinely inside that day.
+//
+// The date/time FORMATS are not re-invented here: they are the exact
+// America/Chicago wall-clock formats the customer appointment picker already
+// uses, validated by the single source of truth in utils/schedule.js. Only the
+// "end must be after start" rule is new.
+//
+// start === end is rejected rather than treated as "all day": a zero-length
+// window is nearly always a typo, and silently storing it would tell the admin
+// the employee is available for a time range that does not exist.
+export function isValidAvailabilityWindow({ date, startTime, endTime } = {}) {
+  if (!isValidDateString(date)) return false;
+  if (!isValidTimeString(startTime) || !isValidTimeString(endTime)) return false;
+  return startTime < endTime;
+}
+
+// An optional free-text note, shared by availability windows and shift requests
+// (both are admin-facing text an employee volunteers). Bounded so a note can
+// never be used to push an unbounded blob into a row the admin has to read.
+//
+// Absence is valid: a note is always optional, so undefined/null/"" pass and a
+// present note must be a bounded string. A non-string is rejected rather than
+// coerced, so `note: { $ne: null }`-style objects cannot be stored.
+export const NOTE_MAX_LENGTH = 500;
+
+export function isValidBoundedNote(v) {
+  if (v === undefined || v === null || v === "") return true;
+  return typeof v === "string" && v.length <= NOTE_MAX_LENGTH;
 }

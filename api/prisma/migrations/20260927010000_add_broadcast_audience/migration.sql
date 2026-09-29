@@ -1,0 +1,48 @@
+-- Employee System Phase 2B-2 — BROADCAST AUDIENCE SEPARATION.
+--
+-- STRICTLY ADDITIVE, in the same style as
+-- 20260927000000_add_employee_accounts_and_assignments:
+--   * 1 ADD COLUMN on the existing Broadcast table
+--   * 1 new index
+-- No DROP COLUMN, no DROP TABLE, no data rewrite, no native enum, and no change
+-- to any existing customer/admin record.
+--
+-- WHY THIS IS REQUIRED (and not a convention)
+-- -----------------------------------------
+-- Before this migration, Broadcast.target had NO role dimension. Its values are
+-- "public" | "all" | "specific_user", and target = "all" read as "every user".
+-- In practice it only ever reached customers, but only because the sole read
+-- route (/broadcasts/mine) was guarded by requireCustomer — an accident of the
+-- route guard, not something the data recorded.
+--
+-- An employee announcement stored as target = "all" would therefore have
+-- appeared in every customer's feed immediately. Reusing the customer meaning
+-- of "all" for employees is exactly the fragile convention this phase forbids,
+-- so the audience is stored explicitly and the customer queries are pinned to
+-- it.
+--
+-- 1) Broadcast.audience — "customer" | "employee"
+--    * ADD COLUMN ... NOT NULL DEFAULT 'customer' backfills every existing row
+--      to 'customer' in place. Postgres 11+ applies this without a table rewrite.
+--    * Therefore every pre-existing row keeps EXACTLY the audience it already
+--      had in practice, and target = "all" continues to mean "all customers"
+--      for all existing data. No row is deleted, renamed or reinterpreted.
+--    * The DEFAULT also means a caller that omits the column can never create an
+--      employee broadcast by accident: the safe, legacy value is the default.
+--      Reaching the employee audience always requires passing it explicitly.
+--    * A String rather than a native enum, matching the existing convention for
+--      role/status/type in this schema (validated in the application layer).
+--
+-- 2) Broadcast_audience_idx — supports the audience-scoped read queries. The
+--    existing type/target indexes are retained; nothing is replaced.
+--
+-- Read state is deliberately UNCHANGED. UserBroadcastRead stays
+-- @@id([userId, broadcastId]), which already makes a duplicate read record
+-- structurally impossible, and it is already keyed by the authenticated
+-- userId, so an employee can only ever have their own read state.
+
+-- Additive: new column, backfilled in place to the pre-existing behavior.
+ALTER TABLE "Broadcast" ADD COLUMN "audience" TEXT NOT NULL DEFAULT 'customer';
+
+-- Additive: new index alongside the existing type/target indexes.
+CREATE INDEX "Broadcast_audience_idx" ON "Broadcast"("audience");

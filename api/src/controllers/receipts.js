@@ -142,8 +142,11 @@ export async function receiptDetail(req, res) {
   const receipt = await prisma.receipt.findUnique({ where: { id }, include: receiptInclude });
   if (!receipt) return res.status(404).json({ error: "Receipt not found" });
 
-  // Customer may view only their own receipt.
-  if (req.user.role === "customer" && receipt.customerId !== req.user.id) {
+  // Customer may view only their own receipt; an admin may view any receipt.
+  // Fail-closed (mirrors the bookings.js archive guard): every role OTHER than
+  // "admin" must own the receipt. Testing "is a customer" instead would let any
+  // future role skip the ownership check and inherit admin visibility.
+  if (req.user.role !== "admin" && receipt.customerId !== req.user.id) {
     return res.status(403).json({ error: "You can only view your own receipt" });
   }
 
@@ -161,7 +164,9 @@ export async function downloadReceiptPdf(req, res) {
   const receipt = await prisma.receipt.findUnique({ where: { id }, include: receiptInclude });
   if (!receipt) return res.status(404).json({ error: "Receipt not found" });
 
-  if (req.user.role === "customer" && receipt.customerId !== req.user.id) {
+  // Same fail-closed rule as receiptDetail: only "admin" may read any receipt;
+  // every other role must own it. Do not narrow this back to "is a customer".
+  if (req.user.role !== "admin" && receipt.customerId !== req.user.id) {
     return res.status(403).json({ error: "You can only download your own receipts" });
   }
 

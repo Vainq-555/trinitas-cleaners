@@ -34,12 +34,21 @@ export async function adminListUsers(req, res) {
 /**
  * Account impersonation/inspection: view a customer's full dashboard data
  * (bookings, services+personalized prices, receipts) without their password.
+ *
+ * This is CUSTOMER-ONLY by name, by doc and by its own error message. The guard
+ * used to reject only `role === "admin"`, which let an employee fall through and
+ * be answered with a customer-shaped payload (their bookings/receipts/custom
+ * prices plus their whole message history) that has no meaning for an employee
+ * account. It is now an explicit allow-list, so an employee — or any future
+ * role — is refused instead of being silently treated as a customer.
+ * Employee administration uses /admin/employees (list) and the
+ * /admin/employees/:id/* lifecycle endpoints, not this customer endpoint.
  */
 export async function adminInspectUser(req, res) {
   const { id } = req.params;
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) return res.status(404).json({ error: "User not found" });
-  if (user.role === "admin") return res.status(400).json({ error: "Target is not a customer" });
+  if (user.role !== "customer") return res.status(400).json({ error: "Target is not a customer" });
 
   const [bookings, receipts, messages] = await Promise.all([
     prisma.booking.findMany({

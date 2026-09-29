@@ -26,6 +26,22 @@ const response = () => ({
 
 const service = { id: "s1", name: "Screen Cleaning", isActive: true, basePrice: 15, monthlyActive: true, monthlyPriceCents: 1200 };
 
+// A booking date that is always in the FUTURE, derived from Date.now().
+//
+// Both create lanes reject a past date (bookings.js:46, subscriptions.js:56:
+// "Booking date cannot be in the past"). This file's fixtures were hard-coded
+// literals chosen while they were ahead, so the suite started failing on its own
+// the day after the dates passed — a time bomb that has nothing to do with the
+// behavior under test. Deriving the date keeps the assertion meaningful (the
+// controller still has to persist exactly the date it was given) without the
+// fixture silently expiring.
+//
+// UTC, not local: the controller persists `new Date(date)`, so a UTC-derived
+// YYYY-MM-DD parses back to the identical instant on any machine, and
+// `new Date(FUTURE_BOOKING_DATE).getTime()` is therefore exact. 30 days of
+// margin clears the guard's one-day grace by a wide margin.
+const FUTURE_BOOKING_DATE = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
 // Arrange prisma stubs so a booking create succeeds without any real DB.
 // Returns a capture object whose `.created` is the Booking.create data.
 // Deliberately mutates each model DELEGATE method in place and restores it in
@@ -116,7 +132,7 @@ test("createBooking persists service location + schedule fields", async () => {
       user: { id: "u1", name: "Ada" },
       body: {
         serviceId: "s1",
-        date: "2026-09-28",
+        date: FUTURE_BOOKING_DATE,
         paymentMethod: "cash",
         serviceAddress: { line1: "Tax St", city: "Minneapolis", state: "MN", postalCode: "55303", country: "US" },
         serviceLocation: { line1: "123 Work Way", line2: "Unit B", city: "Chicago", state: "IL", postalCode: "60607", country: "US" },
@@ -136,7 +152,7 @@ test("createBooking persists service location + schedule fields", async () => {
     assert.equal(capture.created.scheduledStartAt.getTime(), new Date("2026-09-27T15:00:00.000Z").getTime());
     // Existing fields keep working unchanged.
     assert.equal(capture.created.taxAddressCity, "Minneapolis");
-    assert.equal(capture.created.date.getTime(), new Date("2026-09-28").getTime());
+    assert.equal(capture.created.date.getTime(), new Date(FUTURE_BOOKING_DATE).getTime());
   } finally {
     restore();
   }
@@ -150,7 +166,7 @@ test("createBooking rejects a malformed schedule instead of silently dropping it
       user: { id: "u1", name: "Ada" },
       body: {
         serviceId: "s1",
-        date: "2026-09-28",
+        date: FUTURE_BOOKING_DATE,
         scheduledStartDate: "2026-09-27",
         scheduledStartTime: "25:00",
       },
@@ -170,7 +186,7 @@ test("createBooking rejects invalid service location", async () => {
       user: { id: "u1", name: "Ada" },
       body: {
         serviceId: "s1",
-        date: "2026-09-28",
+        date: FUTURE_BOOKING_DATE,
         serviceLocation: { line1: "No state", city: "Chicago", state: "ZZ", postalCode: "60607", country: "US" },
         scheduledStartDate: "2026-09-27",
         scheduledStartTime: "10:00",
@@ -189,7 +205,7 @@ test("createBooking legacy request without location/schedule still succeeds (no 
     const res = response();
     await createBooking({
       user: { id: "u1", name: "Ada" },
-      body: { serviceId: "s1", date: "2026-09-28", paymentMethod: "cash" },
+      body: { serviceId: "s1", date: FUTURE_BOOKING_DATE, paymentMethod: "cash" },
     }, res);
     assert.equal(res.statusCode, 201);
     assert.equal(capture.created.serviceLocationAddressLine1, null);
@@ -210,7 +226,7 @@ test("createSubscriptionBooking persists service location + schedule fields", as
       user: { id: "u1", name: "Ada" },
       body: {
         serviceId: "s1",
-        date: "2026-09-28",
+        date: FUTURE_BOOKING_DATE,
         months: 3,
         serviceAddress: { line1: "Tax St", city: "Minneapolis", state: "MN", postalCode: "55303", country: "US" },
         serviceLocation: { line1: "123 Work Way", city: "Chicago", state: "IL", postalCode: "60607", country: "US" },

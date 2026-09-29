@@ -42,8 +42,15 @@ const userFixture = (overrides = {}) => ({
 // take. Rows carry their `customer` relation shape already; the fake never
 // joins. No `.message` accessor is exposed: any community code that touches the
 // existing Message model throws here, proving isolation.
+//
+// Phase 2B-5: fixture rows are normalized to audience = "customer" on the way in.
+// That is not a convenience — it faithfully models the migration's
+// `ADD COLUMN audience TEXT NOT NULL DEFAULT 'customer'`, which backfills EVERY
+// pre-existing row to "customer". A real row read from this table therefore
+// always carries an explicit audience, which is what the pinned customer query
+// matches on. Rows that name an audience explicitly are left alone.
 const makeDb = ({ messages = [], users = [] } = {}) => {
-  const msgRows = messages.map((m) => ({ ...m }));
+  const msgRows = messages.map((m) => ({ audience: "customer", ...m }));
   const userRows = users.map((u) => ({ ...u }));
   let seq = msgRows.length;
 

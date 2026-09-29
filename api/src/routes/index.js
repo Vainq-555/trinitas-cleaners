@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, optionalAuthenticate, requireAdmin, requireCustomer } from "../middleware/auth.js";
+import { authenticate, optionalAuthenticate, requireAdmin, requireCustomer, requireEmployee } from "../middleware/auth.js";
 
 import * as auth from "../controllers/auth.js";
 import * as services from "../controllers/services.js";
@@ -21,6 +21,11 @@ import * as reconciliation from "../controllers/reconciliation.js";
 import * as cashPayments from "../controllers/cashPayments.js";
 import * as subscriptions from "../controllers/subscriptions.js";
 import * as geocode from "../controllers/geocode.js";
+import * as employees from "../controllers/employees.js";
+import * as assignments from "../controllers/assignments.js";
+import * as availability from "../controllers/availability.js";
+import * as shifts from "../controllers/shifts.js";
+import * as employeeCommunity from "../controllers/employeeCommunity.js";
 
 const router = Router();
 
@@ -38,6 +43,10 @@ router.post("/auth/register", auth.register);
 router.post("/auth/login", auth.login);
 router.post("/auth/forgot-password", auth.forgotPassword);
 router.post("/auth/reset-password", auth.resetPassword);
+// Employee self-activation: public + rate-limited, because the invitee has no
+// password yet. Redeems a single-use invitation token and sets their first
+// password. Nothing here can target another account (see the handler).
+router.post("/auth/employee-activation", auth.activateEmployeeAccount);
 router.post("/auth/logout", authenticate, auth.logout);
 router.get("/auth/me", authenticate, auth.me);
 router.post("/auth/heartbeat", authenticate, auth.heartbeat);
@@ -97,6 +106,60 @@ router.get("/profile", authenticate, requireCustomer, profiles.getOwnProfile);
 router.put("/profile", authenticate, requireCustomer, profiles.updateOwnProfile);
 router.get("/profile/:userId", authenticate, requireCustomer, profiles.getPublicProfile);
 
+// ---------- Employee ----------
+// Every employee route is explicitly `authenticate` + `requireEmployee`. This is
+// additive and separate: it does not widen requireCustomer, and an employee
+// reaching a customer-only or admin-only route is still denied by that route's
+// own guard (employee inherits no customer or admin capability).
+// `authenticate` also rejects a disabled account, so a disabled employee's
+// already-issued session stops being authorized on its next request.
+router.get("/employee/assignments", authenticate, requireEmployee, assignments.listMyAssignments);
+
+// Employee announcements (Phase 2B-2). `authenticate` + `requireEmployee` again,
+// so a disabled employee's existing session stops working on its next request
+// and a customer/admin is refused before any query runs. The controllers scope
+// every read to `audience = "employee"` and to `req.user.id` — no employee id is
+// ever accepted from the request, so there is no way to ask for another
+// employee's announcements.
+router.get("/employee/broadcasts", authenticate, requireEmployee, broadcasts.listMyEmployeeBroadcasts);
+router.post(
+  "/employee/broadcasts/:id/read",
+  authenticate,
+  requireEmployee,
+  broadcasts.markEmployeeBroadcastRead,
+);
+
+// Employee availability + available shifts (Phase 2B-4).
+//
+// `authenticate` + `requireEmployee` on every one of them, exactly like the
+// employee routes above. There is deliberately NO route that takes an employee id
+// from the client for a write: the controllers always use `req.user.id`, so
+// there is no parameter an employee could change to reach another employee's
+// availability or requests. `/employee/shifts/requests` is registered BEFORE
+// `/employee/shifts/:id/request` so the literal path can never be captured as an
+// `:id` (it would not match anyway — different segment count — but order makes
+// the intent explicit).
+router.get("/employee/availability", authenticate, requireEmployee, availability.listMyAvailability);
+router.post("/employee/availability", authenticate, requireEmployee, availability.createMyAvailability);
+router.patch("/employee/availability/:id", authenticate, requireEmployee, availability.updateMyAvailability);
+router.delete("/employee/availability/:id", authenticate, requireEmployee, availability.deleteMyAvailability);
+
+router.get("/employee/shifts", authenticate, requireEmployee, shifts.listMyShifts);
+router.get("/employee/shifts/requests", authenticate, requireEmployee, shifts.listMyShiftRequests);
+router.post("/employee/shifts/:id/request", authenticate, requireEmployee, shifts.requestShift);
+
+// Employee community (Phase 2B-5). `authenticate` + `requireEmployee` on both,
+// exactly like every employee route above: a disabled employee's existing
+// session stops working on its next request, and a customer or admin is refused
+// before any query runs. There is deliberately no parameter that names another
+// employee, so an employee cannot ask for a colleague's community or post as one.
+//
+// Both routes live on their own `/employee/community` prefix rather than under
+// the customer `/community` prefix, so the two audiences cannot collide on a
+// path and the customer routes' requireCustomer guard is never in scope here.
+router.get("/employee/community/messages", authenticate, requireEmployee, employeeCommunity.listMyEmployeeCommunityMessages);
+router.post("/employee/community/messages", authenticate, requireEmployee, employeeCommunity.createEmployeeCommunityMessage);
+
 // ---------- Admin ----------
 const adminOnly = [authenticate, requireAdmin];
 
@@ -108,6 +171,41 @@ router.get("/admin/stats", adminOnly, users.adminStats);
 
 router.get("/admin/bookings", adminOnly, bookings.adminListBookings);
 router.patch("/admin/bookings/:id/status", adminOnly, bookings.adminSetBookingStatus);
+
+// Employee accounts. Admin-only: employees are never self-created and never
+// self-managed. Disable/reactivate only set/clear User.disabledAt — neither
+// deletes the user, so identity, assignments and history are preserved.
+router.get("/admin/employees", adminOnly, employees.adminListEmployees);
+router.post("/admin/employees", adminOnly, employees.adminCreateEmployee);
+router.post("/admin/employees/:id/disable", adminOnly, employees.adminDisableEmployee);
+router.post("/admin/employees/:id/reactivate", adminOnly, employees.adminReactivateEmployee);
+
+// Assign an accepted booking to an employee. Writes only BookingAssignment:
+// Booking.customerId and Booking.scheduledStartAt are never modified.
+router.post("/admin/bookings/:id/assignment", adminOnly, assignments.adminAssignBooking);
+
+// Available shifts + shift requests (Phase 2B-4), all `adminOnly` like every
+// other admin route. `/admin/shifts/candidates` is registered before the
+// `/admin/shifts/:id` routes for the same explicit-reasoning reason as above.
+//
+// Approving a request calls the SAME assignment rules as
+// /admin/bookings/:id/assignment (shared `applyBookingAssignment`), so an
+// approval is never a second, laxer way to assign work.
+router.get("/admin/availability", adminOnly, availability.adminListAvailability);
+router.get("/admin/shifts", adminOnly, shifts.adminListShifts);
+router.get("/admin/shifts/candidates", adminOnly, shifts.adminListShiftCandidates);
+router.post("/admin/shifts", adminOnly, shifts.adminCreateShift);
+router.patch("/admin/shifts/:id", adminOnly, shifts.adminUpdateShift);
+router.post(
+  "/admin/shifts/:id/request/:requestId/approve",
+  adminOnly,
+  shifts.adminApproveShiftRequest,
+);
+router.post(
+  "/admin/shifts/:id/request/:requestId/decline",
+  adminOnly,
+  shifts.adminDeclineShiftRequest,
+);
 
 router.get("/admin/payments/reconciliation", adminOnly, reconciliation.adminPaymentReconciliation);
 router.post("/admin/payments/:bookingId/cash-quote", adminOnly, cashPayments.adminCashQuote);
@@ -153,6 +251,21 @@ router.get("/admin/community/profiles", adminOnly, profiles.adminListProfiles);
 router.get("/admin/community/profiles/:userId", adminOnly, profiles.adminGetProfile);
 router.post("/admin/community/profiles/:userId/hide", adminOnly, profiles.adminHideProfile);
 router.post("/admin/community/profiles/:userId/unhide", adminOnly, profiles.adminUnhideProfile);
+
+// Employee community moderation (Phase 2B-5), all `adminOnly` like every other
+// admin route. Deliberately NESTED under /admin/community/employee rather than
+// sharing the customer community's /admin/community/messages and
+// /admin/community/users paths: an admin moderating the employee community gets
+// a distinct, audience-pinned surface, so the customer moderation endpoints keep
+// exactly the meaning and behavior they already had.
+//
+// There is NO admin create route. Admins moderate the employee community and
+// never author in it — the same rule the customer community has always had.
+router.get("/admin/community/employee/messages", adminOnly, employeeCommunity.adminListEmployeeCommunityMessages);
+router.delete("/admin/community/employee/messages/:messageId", adminOnly, employeeCommunity.adminDeleteEmployeeCommunityMessage);
+router.get("/admin/community/employee/users", adminOnly, employeeCommunity.adminListEmployeeCommunityUsers);
+router.post("/admin/community/employee/users/:id/block", adminOnly, employeeCommunity.adminBlockEmployee);
+router.post("/admin/community/employee/users/:id/unblock", adminOnly, employeeCommunity.adminUnblockEmployee);
 
 router.get("/admin/community/groups", adminOnly, groups.adminListGroups);
 router.get("/admin/community/groups/:groupId", adminOnly, groups.adminGetGroup);

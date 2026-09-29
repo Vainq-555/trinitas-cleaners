@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api, fmtDateTime } from "@/lib/api";
+import { counterpartBadge, counterpartSubtitle, isEmployeeThread } from "@/lib/threadCounterpart.mjs";
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -73,7 +74,7 @@ export default function AdminMessagesPage() {
 
   return (
     <Shell links={links} sections={["Admin Portal"]} title="Communication Hub"
-      subtitle="Reply directly to customers about issues, pricing, and custom requests.">
+      subtitle="Reply directly to customers and employees about issues, pricing, and custom requests.">
       <div className="grid gap-6 lg:grid-cols-[320px_1fr] items-start">
         {/* Threads */}
         <div className="card overflow-hidden">
@@ -83,7 +84,7 @@ export default function AdminMessagesPage() {
           </div>
           <div className="p-2.5 max-h-[600px] overflow-y-auto">
             {threads.length === 0 && (
-              <p className="p-4 text-sm text-muted">No customer conversations yet.</p>
+              <p className="p-4 text-sm text-muted">No conversations yet.</p>
             )}
             {threads.map((t) => (
               <button
@@ -95,9 +96,23 @@ export default function AdminMessagesPage() {
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold text-ink truncate">{t.customer.name}</span>
-                  {t.unread > 0 && (
-                    <span className="rounded-full bg-danger px-2 py-0.5 text-[10px] font-bold uppercase text-white">new</span>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* Phase 2B-3: the thread is labeled from the server-supplied
+                        User.role, so an employee conversation is visibly an employee
+                        conversation. Customers keep the unchanged appearance. */}
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                        isEmployeeThread(t)
+                          ? "bg-warnbg text-amber-700"
+                          : "bg-slate-100 text-muted"
+                      }`}
+                    >
+                      {counterpartBadge(t)}
+                    </span>
+                    {t.unread > 0 && (
+                      <span className="rounded-full bg-danger px-2 py-0.5 text-[10px] font-bold uppercase text-white">new</span>
+                    )}
+                  </div>
                 </div>
                 <div className="mt-0.5 text-xs text-muted truncate">{t.lastMessage}</div>
                 <div className="mt-1 text-[11px] text-muted">{fmtDateTime(t.lastAt)}</div>
@@ -123,9 +138,11 @@ export default function AdminMessagesPage() {
                 </span>
                 <div>
                   <div className="font-bold text-ink">
-                    {threads.find((t) => t.customer.id === active)?.customer.name || "Customer"}
+                    {threads.find((t) => t.customer.id === active)?.customer.name || "Conversation"}
                   </div>
-                  <div className="text-xs text-muted">Direct conversation</div>
+                  <div className="text-xs text-muted">
+                    {counterpartSubtitle(threads.find((t) => t.customer.id === active))}
+                  </div>
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto bg-slate-50/60 p-5 space-y-3">
@@ -149,7 +166,7 @@ export default function AdminMessagesPage() {
                 <div ref={bottomRef} />
               </div>
               <form className="flex gap-2 border-t border-line p-3.5 bg-white" onSubmit={send}>
-                <input className="input flex-1" placeholder="Reply to this customer…" value={draft}
+                <input className="input flex-1" placeholder="Reply to this conversation…" value={draft}
                   onChange={(e) => setDraft(e.target.value)} />
                 <button className="btn btn-primary" disabled={sending || !draft.trim()}>
                   <Send size={16} /> Send

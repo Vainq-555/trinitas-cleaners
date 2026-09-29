@@ -30,14 +30,34 @@ const links = [
 export default function BroadcastsPage() {
   const [broadcasts, setBroadcasts] = useState([]);
   const [customers, setCustomers] = useState([]);
-  const [form, setForm] = useState({ type: "announcement", target: "public", title: "", content: "", userId: "" });
+  const [employees, setEmployees] = useState([]);
+  // Phase 2B-2: `audience` (customer | employee) is chosen FIRST and is explicit.
+  // The target options are then derived from it, so the four deliverable cases
+  // read unambiguously — All customers / A specific customer / All employees /
+  // A specific employee — and the invalid "public site + employee" combination is
+  // not even offered (the server rejects it too).
+  const EMPTY_FORM = { type: "announcement", audience: "customer", target: "all", title: "", content: "", userId: "" };
+  const [form, setForm] = useState(EMPTY_FORM);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const TARGET_OPTIONS = {
+    customer: [
+      { value: "public", label: "Public main site" },
+      { value: "all", label: "All customers" },
+      { value: "specific_user", label: "A specific customer" },
+    ],
+    employee: [
+      { value: "all", label: "All employees" },
+      { value: "specific_user", label: "A specific employee" },
+    ],
+  };
+
   const load = () => {
     api("/admin/broadcasts").then((d) => setBroadcasts(d.broadcasts)).catch(() => {});
     api("/admin/users").then((d) => setCustomers(d.users)).catch(() => {});
+    api("/admin/employees").then((d) => setEmployees(d.employees)).catch(() => {});
   };
 
   useEffect(() => {
@@ -45,6 +65,14 @@ export default function BroadcastsPage() {
   }, []);
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  // Changing the audience resets the target to that audience's first valid option
+  // and clears any previously chosen recipient, so a customer id can never be
+  // submitted while the audience says "employee".
+  const setAudience = (e) => {
+    const audience = e.target.value;
+    setForm({ ...form, audience, target: TARGET_OPTIONS[audience][0].value, userId: "" });
+  };
 
   const publish = async (e) => {
     e.preventDefault();
@@ -54,7 +82,7 @@ export default function BroadcastsPage() {
     try {
       await api("/admin/broadcasts", { method: "POST", body: form });
       setMsg("Broadcast published.");
-      setForm({ type: "announcement", target: "public", title: "", content: "", userId: "" });
+      setForm(EMPTY_FORM);
       load();
     } catch (x) {
       setErr(x.message);
@@ -69,21 +97,34 @@ export default function BroadcastsPage() {
     load();
   };
 
-  const targetLabel = (b) =>
-    b.target === "public" ? { text: "Public site", cls: "bg-brand-light text-brand" }
-      : b.target === "all" ? { text: "All customers", cls: "bg-clean-light text-clean" }
-      : { text: b.user?.name || "Specific customer", cls: "bg-warnbg text-amber-700" };
+  // Labels are explicit about BOTH the audience and the target. A row is never
+  // shown as a bare "All", because "all" means "all of this audience" only.
+  const targetLabel = (b) => {
+    if (b.target === "public") return { text: "Public site · All customers", cls: "bg-brand-light text-brand" };
+    const employee = b.audience === "employee";
+    if (b.target === "all") {
+      return employee
+        ? { text: "All employees", cls: "bg-clean-light text-clean" }
+        : { text: "All customers", cls: "bg-clean-light text-clean" };
+    }
+    return {
+      text: `${employee ? "Specific employee" : "Specific customer"}: ${b.user?.name || "—"}`,
+      cls: "bg-warnbg text-amber-700",
+    };
+  };
+
+  const isEmployee = form.audience === "employee";
 
   return (
     <Shell links={links} sections={["Admin Portal"]} title="Notifications & Announcements"
-      subtitle="Publish to the public site, all customers, or one specific customer.">
+      subtitle="Publish to the public site, to all customers, to all employees, or to one specific account.">
       {/* Publish form */}
       <div className="card card-pad mb-6">
         <div className="flex items-center gap-2.5">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-light text-brand"><Megaphone size={18} /></span>
           <div>
             <h2 className="font-bold text-ink">Publish a broadcast</h2>
-            <p className="text-xs text-muted">Pick a type and choose who sees it.</p>
+            <p className="text-xs text-muted">Pick the audience first, then who within it receives it.</p>
           </div>
         </div>
         {err && <div className="form-error mt-4">{err}</div>}
@@ -98,11 +139,23 @@ export default function BroadcastsPage() {
               </select>
             </div>
             <div>
-              <label className="label">Target</label>
+              <label className="label">Audience</label>
+              <select className="input" value={form.audience} onChange={setAudience}>
+                <option value="customer">Customers</option>
+                <option value="employee">Employees</option>
+              </select>
+              <p className="mt-1 text-xs text-muted">
+                {isEmployee
+                  ? "Only employee accounts will receive this. Customers will not see it."
+                  : "Only customer accounts will receive this. Employees will not see it."}
+              </p>
+            </div>
+            <div>
+              <label className="label">Who receives it</label>
               <select className="input" value={form.target} onChange={set("target")}>
-                <option value="public">Public main site</option>
-                <option value="all">All customer accounts</option>
-                <option value="specific_user">A specific customer account</option>
+                {TARGET_OPTIONS[form.audience].map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
               </select>
             </div>
             <div className="sm:col-span-2">
@@ -117,13 +170,27 @@ export default function BroadcastsPage() {
             </div>
             {form.target === "specific_user" && (
               <div className="sm:col-span-2">
-                <label className="label">Customer</label>
+                <label className="label">{isEmployee ? "Employee" : "Customer"}</label>
                 <select className="input" required value={form.userId} onChange={set("userId")}>
-                  <option value="">— Select customer —</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.email})</option>
-                  ))}
+                  <option value="">
+                    — Select {isEmployee ? "employee" : "customer"} —
+                  </option>
+                  {isEmployee
+                    ? employees.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.name} ({emp.email}){emp.disabledAt ? " — disabled" : ""}
+                        </option>
+                      ))
+                    : customers.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name} ({c.email})</option>
+                      ))}
                 </select>
+                {isEmployee ? (
+                  <p className="mt-1 text-xs text-muted">
+                    A disabled employee cannot sign in, so they will not receive this until an
+                    admin reactivates their account.
+                  </p>
+                ) : null}
               </div>
             )}
           </div>

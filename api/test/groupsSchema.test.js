@@ -150,9 +150,37 @@ test("G1a schema: existing Community/Profile/Message models unchanged", () => {
       "@@index([displayName])",
     ],
   };
-  for (const [name, lines] of Object.entries(expected)) {
-    assert.deepEqual(blockLines(name), lines, `model ${name} must remain unchanged`);
+
+  // Message and CommunityProfile are untouched by every phase, so they are still
+  // held to an EXACT list. This remains the guard it was written to be.
+  for (const name of ["Message", "CommunityProfile"]) {
+    assert.deepEqual(blockLines(name), expected[name], `model ${name} must remain unchanged`);
   }
+
+  // CommunityMessage IS extended, additively, by Phase 2B-5 (the employee
+  // community's `audience` column plus admin soft delete). The guard is
+  // therefore restated in the only form that is still meaningful for an
+  // additively-extended model, and it is just as strict:
+  //   (a) EVERY original line is still present, verbatim — nothing was removed,
+  //       renamed, retyped or re-defaulted; and
+  //   (b) the set of additional lines is EXACTLY the five Phase 2B-5 lines.
+  // Any other edit — a dropped field, a changed default, an extra column — fails.
+  const actual = blockLines("CommunityMessage");
+  for (const line of expected.CommunityMessage) {
+    assert.ok(actual.includes(line), `model CommunityMessage must still contain: ${line}`);
+  }
+  const original = new Set(expected.CommunityMessage);
+  const additions = actual.filter((l) => !l.startsWith("//") && !original.has(l));
+  assert.deepEqual(additions, [
+    // The load-bearing column: NOT NULL DEFAULT 'customer', so every
+    // pre-existing customer post is backfilled in place and unchanged.
+    'audience String @default("customer")',
+    // Admin soft delete (mirrors GroupMessage).
+    "deletedAt DateTime?",
+    "deletedById String?",
+    'deletedBy User? @relation("CommunityMessageDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)',
+    "@@index([audience])",
+  ], "CommunityMessage may gain ONLY the additive Phase 2B-5 lines");
 });
 
 test("G1f schema: Group carries a nullable unique inviteCode", () => {

@@ -25,6 +25,14 @@ export async function authenticate(req, res, next) {
   const user = await prisma.user.findUnique({ where: { id: payload.sub } });
   if (!user) return res.status(401).json({ error: "Account no longer exists" });
 
+  // Account disable is a SEPARATE lifecycle from online/offline presence
+  // (User.status) and is re-read from the database on every request. It is
+  // deliberately NOT part of the JWT, so an admin disable takes effect on the
+  // very next request and invalidates already-issued sessions. Customers and
+  // admins are never disabled (no API sets disabledAt for them), so their
+  // behavior is unchanged.
+  if (user.disabledAt) return res.status(401).json({ error: "Account is disabled" });
+
   req.user = user;
 
   // Heartbeat: refresh lastActiveAt in the background without blocking.
@@ -53,6 +61,9 @@ export async function optionalAuthenticate(req, res, next) {
   try {
     const user = await prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user) return next();
+    // A disabled account gets no personalized public data either: it is treated
+    // as anonymous rather than as a signed-in user.
+    if (user.disabledAt) return next();
     req.user = user;
     next();
   } catch (error) {
@@ -73,3 +84,9 @@ export function requireRole(...roles) {
 
 export const requireAdmin = requireRole(ROLES.ADMIN);
 export const requireCustomer = requireRole(ROLES.CUSTOMER);
+
+// Employee access is ALWAYS explicit and never implied: this is a separate
+// single-role guard, not a widening of requireCustomer. An employee hitting a
+// customer-only or admin-only route is denied by those guards, and a customer
+// hitting an employee-only route is denied here.
+export const requireEmployee = requireRole(ROLES.EMPLOYEE);

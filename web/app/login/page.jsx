@@ -6,7 +6,7 @@ import { LogIn, Sparkles, LockKeyhole, Mail } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth, homeForRole } from "@/lib/auth";
 
 export default function LoginPage() {
   const { refresh } = useAuth();
@@ -22,7 +22,9 @@ export default function LoginPage() {
     try {
       const data = await api("/auth/login", { method: "POST", body: { email, password } });
       await refresh();
-      window.location.href = data.user.role === "admin" ? "/admin" : "/dashboard";
+      // Role routing: customer → /dashboard, admin → /admin, employee → /employee.
+      // The first two are unchanged; an employee goes to the employee portal.
+      window.location.href = homeForRole(data.user.role);
     } catch (err) {
       setError(err.message);
     } finally {

@@ -24,13 +24,23 @@ model User {
   name         String
   phone        String?
   address      String?
-  role         String    @default("customer") // "admin" | "customer"
+  role         String    @default("customer") // "admin" | "customer" | "employee" (no hierarchy)
   status       String    @default("offline") // "online" | "offline"
   lastActiveAt DateTime?
   createdAt    DateTime  @default(now())
   // Set when the customer is blocked from posting in the community chat;
   // NULL means the customer may post. Admins clear it to unblock.
   communityBlockedAt DateTime?
+
+  // EMPLOYEE ACCOUNT LIFECYCLE — additive and separate from `status`.
+  // `status` stays presence-only (online/offline heartbeat) and is untouched.
+  // disabledAt NULL = account enabled; non-NULL = account disabled by an admin.
+  // Disabling NEVER deletes the user and never cascades: the employee identity,
+  // their booking assignments and all history remain intact. It is re-read from
+  // the database on every authenticated request (never cached in the JWT), so a
+  // disable immediately invalidates existing sessions. NULL for every existing
+  // customer/admin row, so their behavior is unchanged.
+  disabledAt DateTime?
 
   // Stripe Customer identity — the SINGLE source of truth for the customer's
   // recurring-billing identity. NULL until the customer ever pays via "Pay Now"
@@ -48,6 +58,11 @@ model User {
   receipts         Receipt[]
   reviews          Review[]
   communityMessages CommunityMessage[]
+  // Phase 2B-5 back-relation for the named CommunityMessage moderation relation.
+  // Separate from `communityMessages` (which is the AUTHOR side) because the
+  // same model references User twice: once as author, once as the admin who
+  // removed the post.
+  communityMessagesDeleted CommunityMessage[] @relation("CommunityMessageDeletedBy")
   communityProfile CommunityProfile?
   groupMembers    GroupMember[]
   groupMessages   GroupMessage[]
@@ -58,6 +73,21 @@ model User {
   broadcastReads UserBroadcastRead[]
   broadcasts     Broadcast[]
   passwordResets PasswordResetToken[]
+
+  // Employee-system back-relations (additive). The two BookingAssignment lists
+  // are named relations so the same model can reference User twice: the
+  // employee who performs the work, and the admin who made the assignment.
+  employeeInvitations EmployeeInvitation[]
+  employeeAssignments BookingAssignment[]   @relation("AssignedEmployee")
+  assignmentsMade     BookingAssignment[]   @relation("AssignedBy")
+
+  // Phase 2B-4 back-relations (additive). Named relations so the same model can
+  // reference User more than once: the employee who declared availability, the
+  // employee who requested a shift, and the admin who decided/created each one.
+  availabilities   EmployeeAvailability[] @relation("AvailabilityEmployee")
+  shiftRequests    ShiftRequest[]         @relation("ShiftRequestEmployee")
+  shiftOffersMade  ShiftOffer[]           @relation("ShiftOfferCreator")
+  shiftDecisions   ShiftRequest[]         @relation("ShiftRequestDecider")
 
   @@index([role])
 }
@@ -162,6 +192,16 @@ model Booking {
   payment   Payment?
   review    Review?
   promotion Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
+
+  // Which employee performs this booking. Additive back-relation only: it does
+  // NOT change customerId and does NOT reuse/overwrite scheduledStartAt (the
+  // employee's own schedule is BookingAssignment.scheduledStartAt).
+  employeeAssignments BookingAssignment[]
+
+  // Phase 2B-4: the optional pool offer for this booking. At most one offer per
+  // booking (ShiftOffer.bookingId @unique). PURELY additive — a booking gains no
+  // new required field and behaves identically whether or not an offer exists.
+  shiftOffer ShiftOffer?
 
   // Optional back-reference to the subscription this booking originated (the
   // request booking lane). The Subscription owns bookingId — Booking does NOT
@@ -309,21 +349,63 @@ model Message {
   @@index([receiverId])
 }
 
-// Customer-to-customer global community chat. Customers post messages visible
-// to all other customers; admins moderate (block/unblock via
-// User.communityBlockedAt) but never author posts. Blocked customers can still
-// read history but their posts are rejected. Deleting a customer account
-// removes their posts (same cascade convention as other User children).
+// The shared community chat wall. Customers post messages visible to all other
+// customers; admins moderate (block/unblock via User.communityBlockedAt) but
+// never author posts. Blocked customers can still read history but their posts
+// are rejected. Deleting a customer account removes their posts (same cascade
+// convention as other User children).
+//
+// PHASE 2B-5 — ONE TABLE, TWO DISJOINT AUDIENCES.
+// Before this phase there was exactly one community and it was customer-only by
+// the accident of its route guards. Adding an employee community to the same
+// table makes "which audience" a property of the DATA rather than of the route
+// that happens to read it, which is the only arrangement in which a customer
+// cannot see employee content.
+//
+// `audience` ("customer" | "employee") — the load-bearing column:
+//   * It is NOT NULL DEFAULT 'customer', so it backfills every pre-existing row
+//     in place and every customer post keeps exactly the audience it always had.
+//   * The default is the SAFE value, so a caller that omits the column creates a
+//     CUSTOMER post. An employee post is only ever created by naming the
+//     employee audience explicitly.
+//   * It is a String, matching this schema's documented convention for
+//     role/status/type (SQLite portability; validated in the API layer).
+//   * There is deliberately NO value meaning "everybody". A customer query
+//     pinned to audience = "customer" can therefore never match an employee row,
+//     so the separation fails CLOSED: a dropped or misspelled filter returns an
+//     empty feed rather than leaking employee posts to customers.
+//
+// `customerId` is the AUTHOR foreign key and is deliberately left un-renamed: it
+// holds the author id for BOTH audiences, so for audience = "employee" it points
+// at an employee. This is the same "one author column, never two" rule the rest
+// of this schema follows (Message.senderId, GroupMessage.senderId). Adding a
+// second, audience-specific author column would allow the two to disagree.
+//
+// `deletedAt` / `deletedById` — admin soft delete, mirroring GroupMessage. NULL
+// deletedAt = visible. Soft delete (rather than a hard DELETE) means a moderated
+// employee post is withdrawn from employees without destroying the record an
+// admin needs in order to review the moderation decision. `deletedById` is
+// nullable with onDelete: SetNull so removing an admin can never delete a post.
 model CommunityMessage {
   id         String   @id @default(cuid())
   customerId String
   content    String
   createdAt  DateTime @default(now())
 
-  customer User @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  // "customer" | "employee" — see the comment above. DEFAULT 'customer'.
+  audience String @default("customer")
+
+  // Admin moderation (Phase 2B-5). NULL deletedAt = the post is visible.
+  deletedAt   DateTime?
+  deletedById String?
+
+  customer User  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  deletedBy User? @relation("CommunityMessageDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
   @@index([customerId])
+  // Supports the audience-pinned read every community query performs.
+  @@index([audience])
 }
 
 // Customer social identity for the Community feature. 1:1 with User; separate
@@ -407,7 +489,29 @@ model Broadcast {
   id        String   @id @default(cuid())
   type      String
   // "public" | "all" | "specific_user"
+  //
+  // NOTE: `target` says WHO-WITHIN-AN-AUDIENCE, never which audience. Before
+  // Phase 2B-2, target = "all" was effectively "every user who could call
+  // /broadcasts/mine" — and that route was requireCustomer, so "all" only ever
+  // reached customers by ACCIDENT of the route guard, not by any stored
+  // intent. That accident is not a safe contract for a second audience: an
+  // employee "all" announcement stored as target = "all" would immediately
+  // appear in every customer's feed. `audience` makes the intent explicit.
   target    String
+  // WHICH AUDIENCE this belongs to: "customer" | "employee".
+  //
+  // Additive in Phase 2B-2. Defaults to "customer" so every row that predates
+  // the column keeps exactly the behavior it had, and so `target = "all"`
+  // continues to mean "all customers" for all existing data — never "everybody".
+  // `audience` is orthogonal to `target`, giving the four explicit cases the
+  // business asked for:
+  //   audience=customer, target=all           -> all customers
+  //   audience=customer, target=specific_user -> one customer
+  //   audience=employee, target=all           -> all employees
+  //   audience=employee, target=specific_user -> one employee
+  // A String, matching this schema's existing convention for role/status/type
+  // (validated in the application layer, see src/utils/validators.js).
+  audience  String   @default("customer")
   title     String?
   content   String
   userId    String? // set when target = "specific_user"
@@ -418,6 +522,7 @@ model Broadcast {
 
   @@index([type])
   @@index([target])
+  @@index([audience])
 }
 
 model UserBroadcastRead {
@@ -510,6 +615,207 @@ model PasswordResetToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// EMPLOYEE SYSTEM — account foundation (Phase 2A).
+//
+// Employee accounts are ADMIN-created and ADMIN-controlled. They are never
+// self-registered (POST /auth/register is hard-wired to the customer role) and
+// never self-deleted. "employee" is a separate role with no hierarchy: it
+// inherits neither customer nor admin capability.
+// ---------------------------------------------------------------------------
+
+// Employee account INVITATION — a dedicated, single-use, expiring credential
+// token. Deliberately a SEPARATE model from PasswordResetToken so the security
+// semantics are never ambiguous: a password-reset token can never be redeemed
+// as an employee invitation, and an invitation can never be redeemed as a
+// password reset (the stored digest is additionally purpose-prefixed, see
+// utils/employeeInvitation.js).
+//
+// Security contract:
+//   - only the SHA-256 digest of the raw token is persisted;
+//   - the raw token exists ONLY inside the emailed activation URL;
+//   - single-use: usedAt is stamped on successful activation;
+//   - expiring: expiresAt is enforced server-side;
+//   - the userId is taken from the token record only, so an activation request
+//     can never target a different account;
+//   - the raw token is never returned by any API response and never logged.
+//
+// The invitation only has to survive until the employee sets their first
+// password, so it cascades with the user it belongs to (it is meaningless
+// without that user). It holds no booking, receipt, customer or payment data,
+// so this cascade can never touch any of those.
+model EmployeeInvitation {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// WHICH EMPLOYEE PERFORMS A CUSTOMER'S BOOKING — a dedicated first-class
+// relation. CRITICAL: Booking.customerId is NEVER reused for employees; the
+// customer relationship on a booking stays exactly as it was. Likewise
+// Booking.scheduledStartAt is the CUSTOMER's requested/confirmed schedule and is
+// never overwritten by an admin assignment — the employee's own scheduled start
+// lives on this model (BookingAssignment.scheduledStartAt) so the two concepts
+// stay separate:
+//     CUSTOMER REQUEST   -> Booking.scheduledStartAt
+//     ADMIN EMP SCHEDULE -> BookingAssignment.scheduledStartAt
+//
+// bookingId is @unique: at most ONE assigned employee per booking, so a booking
+// can never be handed to two employees at once (which would leak one employee's
+// work to another).
+//
+// Referential safety (deleting/removing/deactivating an employee must never
+// delete a customer's booking, receipt, customer, or any payment/history):
+//   - employee  onDelete: SetNull  -> removing an employee row keeps the
+//     assignment record and the booking; the work is never cascaded away.
+//   - assignedBy onDelete: SetNull -> removing the admin who made the
+//     assignment keeps the assignment (nullable) rather than destroying work.
+//   - booking   onDelete: Cascade  -> an assignment cannot outlive the booking
+//     it belongs to; this cascade only ever removes assignment rows, and
+//     booking deletion is pre-existing behavior, not introduced here.
+// Disabling an employee (User.disabledAt) touches neither table at all.
+model BookingAssignment {
+  id         String   @id @default(cuid())
+  bookingId  String   @unique
+  // Nullable + SetNull so an employee row can never drag an assignment (and
+  // therefore a booking) away with it.
+  employeeId String?
+  // Nullable + SetNull so assignment history survives its admin's removal.
+  assignedById String?
+  assignedAt DateTime @default(now())
+  // The employee's own scheduled start (admin-set). NEVER Booking.scheduledStartAt.
+  scheduledStartAt DateTime?
+  // Administrative visibility switch for the employee view. Employee reads are
+  // always server-scoped to req.user.id AND this flag; it can never widen scope.
+  visibleToEmployee Boolean @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  employee   User?   @relation("AssignedEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+  assignedBy User?   @relation("AssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@index([employeeId])
+  @@index([assignedById])
+}
+
+// ---------------------------------------------------------------------------
+// EMPLOYEE AVAILABILITY + AVAILABLE SHIFTS (Phase 2B-4)
+//
+// BookingAssignment REMAINS the single source of truth for actual work. Nothing
+// in this block is an assignment: availability is INFORMATIONAL ("when I can
+// work") and a ShiftRequest is a REQUEST ("please give me this one"). The only
+// thing that creates real work is a BookingAssignment, which is still written
+// exclusively by the existing admin assignment path (POST
+// /admin/bookings/:id/assignment) — approving a request calls that same code.
+//
+// REUSE, NOT DUPLICATION: a "shift" is NOT a new copy of the booking. ShiftOffer
+// points at an existing accepted Booking and the service/date/location are always
+// read through that relation, so a shift can never disagree with its booking.
+// Inspection found no pre-existing availability/shift/shift-request model, so
+// these three are genuinely new; nothing existing is duplicated or rewritten.
+//
+// TIMEZONE: date/startTime/endTime are America/Chicago WALL-CLOCK strings, not
+// UTC instants, matching how the customer picks an appointment (utils/schedule.js
+// is the single source of truth for that wall clock and for validating these
+// formats). Availability is a stated preference, so keeping the wall clock the
+// employee actually wrote avoids any lossy instant conversion. A concrete shift
+// still has a real instant, and that stays BookingAssignment.scheduledStartAt.
+// ---------------------------------------------------------------------------
+
+// One "I can work this window" entry declared by an employee.
+//
+// Informational only: it NEVER reserves anything and NEVER appears on a
+// customer's booking. Strings (not enums) follow the documented schema-wide
+// convention for SQLite portability; validity is enforced in the API layer.
+model EmployeeAvailability {
+  id         String   @id @default(cuid())
+  employeeId String
+  // America/Chicago wall-clock day, "YYYY-MM-DD" (validated by isValidDateString).
+  date       String
+  // 24-hour wall-clock window, "HH:MM" (validated by isValidTimeString).
+  startTime  String
+  endTime    String
+  // "available" | "unavailable" — a day the employee has explicitly blocked is
+  // represented by the same shape so the two never need separate tables.
+  kind       String   @default("available")
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Cascade is correct and intentional here: availability is the employee's own
+  // preference data with no operational history, so removing the account removes
+  // it. (Unlike BookingAssignment, which uses SetNull so work is never lost.)
+  employee User @relation("AvailabilityEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  // Prevents an employee saving the identical window twice by accident, while
+  // still allowing several different windows on the same day.
+  @@unique([employeeId, date, startTime, endTime, kind])
+  @@index([employeeId, date])
+}
+
+// An admin-published offer to take a booking. The booking itself is untouched.
+model ShiftOffer {
+  id          String    @id @default(cuid())
+  // At most ONE pool offer per booking, so two admins cannot double-publish the
+  // same work and an employee can never see the same shift twice.
+  bookingId   String    @unique
+  // Employee-facing instructions for this specific work. Admin-private notes are
+  // NOT stored here — there is no admin-only note field, so nothing private can
+  // leak into the employee view by forgetting to filter it.
+  notes       String?
+  // Optional cutoff: after this instant the shift is no longer requestable.
+  closesAt    DateTime?
+  // NULL = created but CLOSED/unpublished (invisible to employees). A non-NULL
+  // value is the publication moment and is what makes the shift visible.
+  publishedAt DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Cascade: an offer cannot outlive the booking it advertises.
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  // SetNull: removing the publishing admin must not unpublish the shift.
+  createdBy User?   @relation("ShiftOfferCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  requests  ShiftRequest[]
+
+  @@index([publishedAt])
+}
+
+// An employee's request for a published shift. A request is NOT an assignment.
+model ShiftRequest {
+  id          String    @id @default(cuid())
+  shiftId     String
+  employeeId  String
+  // "requested" | "approved" | "declined"
+  status      String    @default("requested")
+  // Optional message from the employee to the admin.
+  note        String?
+  decidedAt   DateTime?
+  decidedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Cascade: the request is meaningless without its shift or its employee.
+  shift      ShiftOffer @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  employee   User       @relation("ShiftRequestEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  // SetNull: removing the deciding admin keeps the decision (and its timestamp).
+  decidedBy  User?      @relation("ShiftRequestDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  // The duplicate-request guard, enforced by the database rather than by a
+  // read-then-write race in application code.
+  @@unique([shiftId, employeeId])
+  @@index([employeeId, status])
 }
 
 // ---------------------------------------------------------------------------

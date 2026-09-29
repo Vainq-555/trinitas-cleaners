@@ -8,7 +8,7 @@ import {
   isValidCommunityMessage,
 } from "../utils/validators.js";
 import { createRateLimiter } from "../utils/rateLimit.js";
-import { ROLES } from "../config.js";
+import { COMMUNITY_AUDIENCE_DEFAULT, ROLES } from "../config.js";
 
 // Express 4 does not catch rejected promises from async handlers. Route the
 // rejection to the existing errorHandler instead of terminating the process.
@@ -79,14 +79,34 @@ function parseLimit(req) {
 // Shared feed logic for the customer and admin GET endpoints. Newest first
 // with createdAt DESC then id DESC (tie-break for identical timestamps). Uses
 // take = limit + 1 to learn whether a next page exists.
-async function readCommunityFeed(req, res, db) {
+//
+// PHASE 2B-5 — THE AUDIENCE IS A CALLER-SUPPLIED LITERAL.
+//
+// `options.audience` is spread straight into the Prisma `where`, and it is the
+// ONLY thing that decides which community is read. It is never read from
+// req.query, req.body, req.params or anything else the client controls. That is
+// the whole reason this function takes it as a parameter with no default: a
+// query string like `?audience=employee` cannot widen a customer read, because
+// nothing in this function ever looks at a request-supplied audience.
+//
+// `options.shape` maps a row to the response. The customer feed keeps its
+// existing `customer: { id, name }` key so the customer UI is untouched; the
+// employee feed maps the same author to `author: { id, name }`.
+//
+// `options.hideDeleted` adds `deletedAt: null`. It is deliberately NOT set for
+// the customer feed: nothing in the codebase can soft-delete a customer-audience
+// row (the admin soft-delete endpoint is pinned to the employee audience), so
+// filtering it would change a query whose results cannot change.
+export async function readCommunityFeed(req, res, db, options) {
+  const { audience, shape, hideDeleted = false } = options || {};
   const limit = parseLimit(req);
   if (limit === null) {
     return badRequest(res, `limit must be an integer from 1 to ${COMMUNITY_LIMIT_MAX}`);
   }
 
   const before = req.query?.before;
-  const where = {};
+  const where = { audience };
+  if (hideDeleted) where.deletedAt = null;
   if (before !== undefined && before !== null && before !== "") {
     const cursor = decodeCursor(before);
     if (!cursor) return badRequest(res, "before must be a valid cursor");
@@ -106,15 +126,20 @@ async function readCommunityFeed(req, res, db) {
   const last = messages[messages.length - 1];
   const nextBefore = hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
 
-  res.json({ messages: messages.map(messageShape), hasMore, nextBefore });
+  res.json({ messages: messages.map(shape), hasMore, nextBefore });
 }
+
+// The customer community's feed configuration. Defined once here so BOTH
+// customer-facing reads — the customer's own feed and the admin moderation feed
+// — are pinned to the identical audience predicate and can never drift apart.
+const CUSTOMER_FEED = { audience: COMMUNITY_AUDIENCE_DEFAULT, shape: messageShape };
 
 // ---- Customer side ----
 
 // GET /api/community/messages (registered in CP3 behind authenticate +
 // requireCustomer). Any authenticated customer, blocked or not, may read.
 export const listCommunityMessages = wrap(async function listCommunityMessages(req, res, next, db = prisma) {
-  return readCommunityFeed(req, res, db);
+  return readCommunityFeed(req, res, db, CUSTOMER_FEED);
 });
 
 // POST /api/community/messages (registered in CP3 behind authenticate +
@@ -147,7 +172,14 @@ export const createCommunityMessage = wrap(async function createCommunityMessage
   communityPostLimiter.record(key);
 
   const created = await db.communityMessage.create({
-    data: { customerId: req.user.id, content: content.trim() },
+    // audience is named explicitly rather than left to the column default, so
+    // the customer community can never be written by omitting it. This is the
+    // same intent Broadcast.audience records, for the same reason.
+    data: {
+      customerId: req.user.id,
+      content: content.trim(),
+      audience: COMMUNITY_AUDIENCE_DEFAULT,
+    },
   });
 
   res.status(201).json({
@@ -163,9 +195,12 @@ export const createCommunityMessage = wrap(async function createCommunityMessage
 // ---- Admin side ----
 
 // GET /api/admin/community/messages (registered in CP3 behind authenticate +
-// requireAdmin). Same safe shape and pagination as the customer feed.
+// requireAdmin). Same safe shape, same pagination and the same audience pin as
+// the customer feed — an admin moderating the community sees the CUSTOMER
+// community, never the employee one. The employee moderation feed is a separate
+// endpoint (controllers/employeeCommunity.js) with its own audience literal.
 export const adminListCommunityMessages = wrap(async function adminListCommunityMessages(req, res, next, db = prisma) {
-  return readCommunityFeed(req, res, db);
+  return readCommunityFeed(req, res, db, CUSTOMER_FEED);
 });
 
 // Shared moderation write: finds the target user, refuses admins, then sets

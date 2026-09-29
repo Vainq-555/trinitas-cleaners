@@ -358,3 +358,31 @@ test("downloadReceiptPdf: customer cannot download another customer's receipt �
     prisma.receipt.findUnique = originalFind;
   }
 });
+
+// ---- Fail-closed ownership regression (hypothetical third role) ----
+//
+// "employee" is a TEST-ONLY hypothetical role used to prove the ownership check
+// no longer treats "not a customer" as "admin". It is deliberately NOT part of
+// ROLES / isValidRole in production config; the handler compares against the
+// literal "admin", so any unrecognized role must now be denied rather than
+// inheriting admin visibility. Before the fix these cases returned 200.
+
+test("receiptDetail: a non-admin, non-customer role cannot view another account's receipt → 403", async () => {
+  const res = await requestReceiptDetail({ userId: "e1", role: "employee", receipt: makeReceipt({ customerId: "u2" }) });
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.error, /your own receipt/);
+  assert.equal(res.body.receipt, undefined, "no receipt may be disclosed");
+});
+
+test("downloadReceiptPdf: a non-admin, non-customer role cannot download any receipt → 403", async () => {
+  const originalFind = prisma.receipt.findUnique;
+  prisma.receipt.findUnique = async () => makeReceipt({ customerId: "u2" });
+  try {
+    const res = makeRes();
+    await downloadReceiptPdf({ user: makeUser("e1", "employee"), params: { id: "r1" } }, res);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.sent, null, "no PDF may be produced");
+  } finally {
+    prisma.receipt.findUnique = originalFind;
+  }
+});

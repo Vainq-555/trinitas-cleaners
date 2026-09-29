@@ -5,9 +5,15 @@ import { COOKIE_NAME, COOKIE_SECURE, ROLES } from "../config.js";
 import { badRequest, isEmail } from "../utils/validators.js";
 import { createRecoveryRateLimiters } from "../utils/rateLimit.js";
 import { requestPasswordReset, performPasswordReset, isValidNewPassword } from "../utils/passwordRecovery.js";
+import { activateWithToken } from "../utils/employeeInvitation.js";
 
 // Lightweight in-memory rate limiter for the recovery flow (see rateLimit.js).
 const recoveryLimits = createRecoveryRateLimiters();
+
+// Separate counters for the employee-activation flow, which is also an
+// unauthenticated endpoint that sets a credential and so carries the same
+// brute-force posture as password recovery.
+const activationLimits = createRecoveryRateLimiters();
 
 const publicUser = (u) => ({
   id: u.id,
@@ -40,6 +46,10 @@ export async function register(req, res) {
   const exists = await prisma.user.findUnique({ where: { email } });
   if (exists) return badRequest(res, "An account with this email already exists");
 
+  // PUBLIC REGISTRATION IS CUSTOMER-ONLY. The role is server-assigned here and
+  // `req.body.role` is never read, so a public registration can never create an
+  // employee (or an admin) no matter what the request contains. Employees are
+  // created by admins only, via POST /admin/employees.
   const user = await prisma.user.create({
     data: {
       name: name.trim(),
@@ -121,6 +131,13 @@ export async function deleteAccount(req, res) {
   if (req.user.role === ROLES.ADMIN) {
     return badRequest(res, "Admins cannot delete themselves through this endpoint");
   }
+  // Employee accounts are ADMIN-CONTROLLED: an admin disables/reactivates them
+  // (never deletes), and their User row is the anchor for their assignment
+  // history. An employee may not remove their own record here, which also stops
+  // an employee from cascading away history that must be preserved.
+  if (req.user.role === ROLES.EMPLOYEE) {
+    return badRequest(res, "Employee accounts cannot be deleted; an administrator manages employee access");
+  }
   await prisma.user.delete({ where: { id: req.user.id } });
   res.clearCookie(COOKIE_NAME, { path: "/" });
   res.json({ ok: true });
@@ -177,6 +194,44 @@ export async function resetPassword(req, res) {
   if (!result.ok) {
     // Invalid / expired / already-used tokens all fail identically.
     return res.status(result.status || 400).json({ error: "Invalid or expired reset link" });
+  }
+
+  res.json({ ok: true });
+}
+
+// POST /api/auth/employee-activation
+// Redeems a single-use employee invitation token and lets the invitee set their
+// own first password. This is the ONLY way an employee account gains a usable
+// password — the admin never sets, sees or receives it.
+//
+// The subject account is resolved from the token record alone: the request
+// carries no user id, so it cannot activate anyone but the invitee. Unknown,
+// expired, already-used, wrong-role and disabled cases all fail identically, so
+// the response never reveals whether an account exists. Rate-limited per IP like
+// the recovery flow. The employee is not logged in automatically; they sign in
+// with the password they just chose.
+export async function activateEmployeeAccount(req, res) {
+  const { token, password } = req.body || {};
+
+  if (!token) {
+    return res.status(400).json({ error: "Invalid or expired invitation link" });
+  }
+  if (!isValidNewPassword(password)) {
+    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  }
+  if (req.body.confirm && password !== req.body.confirm) {
+    return res.status(400).json({ error: "Passwords do not match" });
+  }
+
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  if (!activationLimits.byIp.allow(ip)) {
+    return res.status(429).json({ error: "Too many requests. Please try again later." });
+  }
+  activationLimits.byIp.record(ip);
+
+  const result = await activateWithToken(token, password);
+  if (!result.ok) {
+    return res.status(result.status || 400).json({ error: "Invalid or expired invitation link" });
   }
 
   res.json({ ok: true });

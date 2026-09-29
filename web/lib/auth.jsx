@@ -56,6 +56,21 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
+// Role → home destination. The single source of truth for post-login routing.
+// `customer` and `admin` keep their existing destinations EXACTLY as before; the
+// new `employee` role gets its own destination, so an employee can never be
+// routed into the customer or admin portal (which would bounce them back and
+// risk a redirect loop).
+export const ROLE_HOME = {
+  customer: "/dashboard",
+  admin: "/admin",
+  employee: "/employee",
+};
+
+export function homeForRole(role) {
+  return ROLE_HOME[role] || "/dashboard";
+}
+
 // Wrapper for customer-only pages. Redirects to /login.
 export function RequireCustomer({ children }) {
   const { user, loading } = useAuth();
@@ -64,7 +79,10 @@ export function RequireCustomer({ children }) {
   useEffect(() => {
     if (!loading) {
       if (!user) window.location.href = "/login";
-      else if (user.role !== "customer") window.location.href = "/admin";
+      // Wrong role → that role's own home. For admin this is still "/admin" and
+      // for an unrecognized role "/dashboard", i.e. the previous behavior; only
+      // the new employee role is routed differently (to "/employee").
+      else if (user.role !== "customer") window.location.href = homeForRole(user.role);
       else setChecked(true);
     }
   }, [user, loading]);
@@ -73,7 +91,7 @@ export function RequireCustomer({ children }) {
   return children;
 }
 
-// Wrapper for admin-only pages. Redirects to /admin/login.
+// Wrapper for admin-only pages. Redirects to /login.
 export function RequireAdmin({ children }) {
   const { user, loading } = useAuth();
   const [checked, setChecked] = useState(false);
@@ -81,7 +99,27 @@ export function RequireAdmin({ children }) {
   useEffect(() => {
     if (!loading) {
       if (!user) window.location.href = "/login";
-      else if (user.role !== "admin") window.location.href = "/dashboard";
+      else if (user.role !== "admin") window.location.href = homeForRole(user.role);
+      else setChecked(true);
+    }
+  }, [user, loading]);
+
+  if (loading || !checked) return <PageLoader />;
+  return children;
+}
+
+// Wrapper for employee-only pages. Separate from RequireCustomer/RequireAdmin:
+// a customer or admin landing here is sent to their own home, and an employee
+// reaching a customer-only or admin-only page is denied by those guards. There is
+// no role hierarchy — employee is never treated as a customer or an admin.
+export function RequireEmployee({ children }) {
+  const { user, loading } = useAuth();
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    if (!loading) {
+      if (!user) window.location.href = "/login";
+      else if (user.role !== "employee") window.location.href = homeForRole(user.role);
       else setChecked(true);
     }
   }, [user, loading]);
