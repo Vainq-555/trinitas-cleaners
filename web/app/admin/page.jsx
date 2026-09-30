@@ -15,6 +15,7 @@ import { api, fmtDateTime, money } from "@/lib/api";
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/employees", label: "Employees", icon: UsersRound },
   { href: "/admin/users", label: "Customers", icon: Users },
   { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
   { href: "/admin/reviews", label: "Reviews", icon: Star },

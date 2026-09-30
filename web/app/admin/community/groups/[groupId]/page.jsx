@@ -21,6 +21,7 @@ import {
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/employees", label: "Employees", icon: UsersRound },
   { href: "/admin/users", label: "Customers", icon: Users },
   { href: "/admin/community", label: "Community", icon: MessageCircle },
   { href: "/admin/community/groups", label: "Groups", icon: UsersRound },

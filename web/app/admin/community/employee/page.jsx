@@ -27,6 +27,7 @@ import { mergeNewest, removedCount } from "@/lib/employeeCommunity.mjs";
 
 const links = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/employees", label: "Employees", icon: UsersRound },
   { href: "/admin/users", label: "Customers", icon: Users },
   { href: "/admin/community", label: "Community", icon: MessagesSquare },
   { href: "/admin/community/employee", label: "Employee Community", icon: UsersRound },
