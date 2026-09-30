@@ -7,6 +7,7 @@ import {
   Banknote, RotateCcw, Receipt, Store, Eye,
 MessageCircle,
   UsersRound,
+  UserPlus,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import StatusBadge from "@/components/StatusBadge";
@@ -55,12 +56,18 @@ export default function AdminBookingsPage() {
   const [details, setDetails] = useState(null); // booking detail modal (service location + schedule)
   const [notice, setNotice] = useState("");
   const [err, setErr] = useState("");
+  const [employees, setEmployees] = useState([]);
+  const [assignment, setAssignment] = useState(null); // { booking } assign-employee dialog
+  const [assignForm, setAssignForm] = useState({ employeeId: "", scheduledStartAt: "" });
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignErr, setAssignErr] = useState("");
 
   const load = () => api("/admin/bookings").then((d) => setBookings(d.bookings)).catch(() => {});
   const clearMessages = () => { setNotice(""); setErr(""); };
 
   useEffect(() => {
     load();
+    api("/admin/employees").then((d) => setEmployees(d.employees || [])).catch(() => {});
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
   }, []);
@@ -134,6 +141,52 @@ export default function AdminBookingsPage() {
     }
   };
 
+  const enabledEmployees = employees.filter((e) => !e.disabledAt);
+  const assignedEmployee = (booking) => booking.employeeAssignments?.[0]?.employee?.name || null;
+
+  const openAssign = (booking) => {
+    clearMessages();
+    const current = booking.employeeAssignments?.[0];
+    setAssignErr(""); // reset per-open
+    setAssignForm({
+      employeeId: current?.employeeId || "",
+      // datetime-local needs local YYYY-MM-DDTHH:mm; the API returns ISO UTC.
+      scheduledStartAt: current?.scheduledStartAt ? new Date(current.scheduledStartAt).toISOString().slice(0, 16) : "",
+    });
+    setAssignment({ booking });
+  };
+
+  const submitAssign = async () => {
+    const booking = assignment?.booking;
+    if (!booking) return;
+    if (!assignForm.employeeId) {
+      setAssignErr("Select an employee to assign.");
+      return;
+    }
+    setAssignBusy(true);
+    setAssignErr(""); // reset per-submit
+    setNotice("");
+    setErr("");
+    try {
+      // Reuses the existing upsert endpoint. visibleToEmployee is intentionally
+      // omitted: new assignments keep the server default, reassignment keeps the
+      // existing flag exactly (see applyBookingAssignment).
+      const body = { employeeId: assignForm.employeeId };
+      if (assignForm.scheduledStartAt) body.scheduledStartAt = new Date(assignForm.scheduledStartAt).toISOString();
+      await api(`/admin/bookings/${booking.id}/assignment`, { method: "POST", body });
+      const name = employees.find((e) => e.id === assignForm.employeeId)?.name || "";
+      setNotice(
+        `${bookings.find((b) => b.id === booking.id)?.employeeAssignments?.[0]?.employee
+          ? "Reassigned" : "Assigned"} ${name} to ${booking.service?.name} for ${booking.customer?.name}.`
+      );
+      setAssignment(null);
+      load();
+    } catch (e) {
+      setAssignErr(e.message);
+    } finally {
+      setAssignBusy(false);
+    }
+  };
   const shown = filterBySession(bookings, session);
   const counts = countBySession(bookings);
 
@@ -176,9 +229,16 @@ export default function AdminBookingsPage() {
                       <div className="font-semibold text-ink">{b.customer.name}</div>
                       <div className="text-xs text-muted">{b.customer.email}</div>
                     </td>
-                    <td>{b.service.name}{b.subscription && (
-                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand">Monthly</span>
-                      )}</td>
+                    <td>
+                      <div>{b.service.name}{b.subscription && (
+                          <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand">Monthly</span>
+                        )}</div>
+                      {assignedEmployee(b) && (
+                        <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand">
+                          <UsersRound size={11} /> Assigned: {assignedEmployee(b)}
+                        </span>
+                      )}
+                    </td>
                     <td className="text-muted">{fmtDate(b.date)}</td>
                     <td className="font-semibold">
                       {b.payment?.method === "cash" ? (
@@ -278,9 +338,14 @@ export default function AdminBookingsPage() {
                           </>
                         )}
                         {b.status === "accepted" && (
-                          <button className="btn btn-secondary btn-sm" disabled={busyId === b.id} onClick={() => setStatus(b.id, "worked")}>
-                            <Hammer size={14} /> Mark worked
-                          </button>
+                          <>
+                            <button className="btn btn-secondary btn-sm" disabled={busyId === b.id} onClick={() => openAssign(b)} title="Assign this accepted booking to an employee">
+                              <UserPlus size={14} /> {assignedEmployee(b) ? "Reassign" : "Assign"}
+                            </button>
+                            <button className="btn btn-secondary btn-sm" disabled={busyId === b.id} onClick={() => setStatus(b.id, "worked")}>
+                              <Hammer size={14} /> Mark worked
+                            </button>
+                          </>
                         )}
                         {b.status === "worked" && (
                           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-clean">
@@ -407,6 +472,68 @@ export default function AdminBookingsPage() {
                 <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted">Notes for the crew</h3>
                 <p className="mt-1 text-sm text-ink">{details.note || "—"}</p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {assignment && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 px-4" role="dialog" aria-modal="true">
+          <div className="card card-pad w-full max-w-md">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-bold text-ink">Assign employee</h2>
+              <button className="btn btn-ghost btn-sm" disabled={assignBusy} onClick={() => setAssignment(null)}><X size={14} /> Close</button>
+            </div>
+
+            <div className="mt-4 rounded-xl bg-slate-50 p-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted">Booking</h3>
+              <p className="mt-1 font-semibold text-ink">{assignment.booking.service?.name}</p>
+              <p className="text-xs text-muted">{assignment.booking.customer?.name} · {fmtDate(assignment.booking.date)}</p>
+            </div>
+
+            {assignedEmployee(assignment.booking) && (
+              <div className="mt-3 rounded-xl bg-brand-light/40 p-3 text-sm">
+                <p className="font-semibold text-brand">
+                  <UsersRound size={13} className="inline -mt-0.5 mr-1.5" />Currently assigned to {assignedEmployee(assignment.booking)}
+                </p>
+                <p className="mt-1 text-xs text-muted">Reassigning replaces the current assignment. The customer&apos;s own requested schedule is never modified.</p>
+              </div>
+            )}
+
+            <label className="mt-4 block">
+              <span className="text-sm font-semibold text-ink">Employee</span>
+              <select
+                className="input mt-1 w-full"
+                value={assignForm.employeeId}
+                disabled={assignBusy}
+                onChange={(e) => setAssignForm((f) => ({ ...f, employeeId: e.target.value }))}
+              >
+                <option value="">Select an employee…</option>
+                {enabledEmployees.map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="mt-3 block">
+              <span className="text-sm font-semibold text-ink">Employee scheduled start <span className="font-normal text-muted">(optional)</span></span>
+              <input
+                type="datetime-local"
+                className="input mt-1 w-full"
+                value={assignForm.scheduledStartAt}
+                disabled={assignBusy}
+                onChange={(e) => setAssignForm((f) => ({ ...f, scheduledStartAt: e.target.value }))}
+              />
+              <span className="mt-1 block text-xs text-muted">The employee&apos;s own schedule; distinct from the booking&apos;s requested start.</span>
+            </label>
+
+            {assignErr && <div className="form-error mt-3">{assignErr}</div>}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button className="btn btn-outline btn-sm" disabled={assignBusy} onClick={() => setAssignment(null)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" disabled={assignBusy} onClick={submitAssign}>
+                {assignBusy ? "Assigning…" : assignedEmployee(assignment.booking) ? "Reassign" : "Assign"}
+              </button>
             </div>
           </div>
         </div>

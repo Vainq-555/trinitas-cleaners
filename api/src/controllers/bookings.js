@@ -22,6 +22,24 @@ const bookingInclude = {
   },
 };
 
+// Admin-only booking include. Deliberately NOT added to `bookingInclude`
+// (shared with the customer-facing listMyBookings) — assignment data must never
+// leak to customers. At most one assignment exists per booking (bookingId is
+// unique), so the array is 0-or-1 and needs no extra filtering.
+const adminBookingInclude = {
+  ...bookingInclude,
+  employeeAssignments: {
+    select: {
+      id: true,
+      employeeId: true,
+      scheduledStartAt: true,
+      visibleToEmployee: true,
+      assignedAt: true,
+      employee: { select: { id: true, name: true } },
+    },
+  },
+};
+
 // ---- Customer side ----
 
 export async function createBooking(req, res) {
@@ -216,7 +234,7 @@ export async function adminListBookings(req, res) {
   const bookings = await prisma.booking.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    include: bookingInclude,
+    include: adminBookingInclude,
   });
   res.json({ bookings });
 }
