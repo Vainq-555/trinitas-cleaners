@@ -10,6 +10,7 @@ import {
   adminCreateEmployee,
   adminDisableEmployee,
   adminReactivateEmployee,
+  adminResendEmployeeInvitation,
 } from "../src/controllers/employees.js";
 import {
   createEmployeeInvitationService,
@@ -304,7 +305,7 @@ test("disable: sets disabledAt, never deletes the user, and keeps identity + his
         update: async (args) => { updateArgs = args; return employeeRow({ disabledAt: args.data.disabledAt }); },
         delete: async () => { deleted = true; },
       },
-      employeeInvitation: { updateMany: async () => {} },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
     },
     () => adminDisableEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
   );
@@ -319,7 +320,7 @@ test("disable: sets disabledAt, never deletes the user, and keeps identity + his
   assert.equal(res.body.employee.createdAt.toISOString(), "2026-09-20T00:00:00.000Z");
 });
 
-test("disable: invalidates any outstanding invitation", async () => {
+test("disable: deletes outstanding invitations, never consumed ones", async () => {
   let invArgs = null;
   const res = response();
   await withDb(
@@ -328,12 +329,70 @@ test("disable: invalidates any outstanding invitation", async () => {
         findUnique: async () => employeeRow(),
         update: async (args) => employeeRow({ disabledAt: args.data.disabledAt }),
       },
-      employeeInvitation: { updateMany: async (args) => { invArgs = args; } },
+      employeeInvitation: { deleteMany: async (args) => { invArgs = args; return { count: 1 }; } },
     },
     () => adminDisableEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
   );
+  // Only UNUSED invitations are removed; the filter is the guarantee that a
+  // consumed (usedAt set) invitation survives, so a genuinely activated
+  // employee stays identifiable to the resend guard.
   assert.deepEqual(invArgs.where, { userId: "emp1", usedAt: null });
-  assert.ok(invArgs.data.usedAt instanceof Date);
+  assert.deepEqual(Object.keys(invArgs).sort(), ["where"], "deleteMany carries no usedAt data payload");
+  assert.equal(res.statusCode, 200);
+});
+
+test("regression: INVITED -> DISABLED -> REACTIVATED -> RESEND issues a fresh invitation", async () => {
+  // Stateful mock: invitations behave like the real model — only consumption
+  // writes usedAt, and disable now deletes unused rows via deleteMany.
+  const state = {
+    employee: employeeRow(),
+    invitations: [{ id: "inv1", userId: "emp1", usedAt: null, createdAt: t("2026-09-20T00:00:00Z") }],
+  };
+  const db = {
+    user: {
+      findUnique: async () => ({ ...state.employee }),
+      update: async ({ data }) => {
+        state.employee = { ...state.employee, ...data };
+        return state.employee;
+      },
+    },
+    employeeInvitation: {
+      deleteMany: async ({ where: { userId, usedAt } }) => {
+        const before = state.invitations.length;
+        state.invitations = state.invitations.filter(
+          (i) => !(i.userId === userId && i.usedAt === usedAt),
+        );
+        return { count: before - state.invitations.length };
+      },
+      findFirst: async ({ where }) => state.invitations.find((i) => i.userId === where.userId) ?? null,
+    },
+  };
+
+  const issued = { ids: [], expires: t("2026-09-28T00:00:00Z") };
+  const issueInvitation = async (e) => { issued.ids.push(e.id); return { ok: true, expiresAt: issued.expires }; };
+
+  // 1) INVITED employee is disabled: the outstanding invitation is deleted.
+  const r1 = response();
+  await withDb(db, () => adminDisableEmployee({ user: ADMIN, params: { id: "emp1" } }, r1));
+  assert.equal(r1.statusCode, 200);
+  assert.equal(state.invitations.length, 0, "disable deletes the unused invitation");
+
+  // 2) Reactivation clears disabledAt and creates NO new invitation.
+  const r2 = response();
+  await withDb(db, () => adminReactivateEmployee({ user: ADMIN, params: { id: "emp1" } }, r2));
+  assert.equal(r2.statusCode, 200);
+  assert.equal(state.employee.disabledAt, null, "reactivation clears disabledAt");
+  assert.equal(state.invitations.length, 0, "reactivation never auto-creates an invitation");
+
+  // 3) Resend now issues a fresh invitation for that same never-activated employee.
+  const r3 = response();
+  await withDb(
+    db,
+    () => adminResendEmployeeInvitation({ user: ADMIN, params: { id: "emp1" } }, r3, undefined, { issueInvitation }),
+  );
+  assert.equal(r3.statusCode, 200, "a reactivated never-activated employee may be re-invited");
+  assert.deepEqual(issued.ids, ["emp1"], "resend succeeds and calls issueInvitation for that employee");
+  assert.deepEqual(Object.keys(r3.body).sort(), ["invitationExpiresAt"], "only the expiry is returned");
 });
 
 test("disable: is idempotent and refuses a non-employee target", async () => {
@@ -804,4 +863,156 @@ test("invitation: raw tokens are unguessable (distinct across many draws)", () =
   assert.equal(tokens.size, 200);
   // 256 bits of entropy: no token may repeat or look like a counter.
   assert.equal([...tokens].some((tk) => tk.length !== 43), false);
+});
+
+// =================== resend invitation ===================
+
+test("resend invitation: only an admin may resend", async () => {
+  let issued = false;
+  const res = response();
+  await withDb({}, () =>
+    adminResendEmployeeInvitation(
+      { user: { id: "emp1", role: ROLES.EMPLOYEE }, params: { id: "emp1" } },
+      res,
+      undefined,
+      { issueInvitation: async () => { issued = true; return { ok: true, expiresAt: t("2026-09-28T00:00:00Z") }; } },
+    ),
+  );
+  assert.equal(res.statusCode, 403);
+  assert.equal(issued, false);
+});
+
+test("resend invitation: a missing target is a 404", async () => {
+  let issued = false;
+  const res = response();
+  await withDb(
+    { user: { findUnique: async () => null } },
+    () =>
+      adminResendEmployeeInvitation(
+        { user: ADMIN, params: { id: "nope" } },
+        res,
+        undefined,
+        { issueInvitation: async () => { issued = true; return { ok: true, expiresAt: t("2026-09-28T00:00:00Z") }; } },
+      ),
+  );
+  assert.equal(res.statusCode, 404);
+  assert.equal(issued, false, "no invitation may be issued for a missing employee");
+});
+
+test("resend invitation: refuses a non-employee target", async () => {
+  const res = response();
+  await withDb(
+    { user: { findUnique: async () => employeeRow({ role: ROLES.CUSTOMER }) } },
+    () =>
+      adminResendEmployeeInvitation(
+        { user: ADMIN, params: { id: "emp1" } },
+        res,
+        undefined,
+        { issueInvitation: async () => ({ ok: true, expiresAt: t("2026-09-28T00:00:00Z") }) },
+      ),
+  );
+  assert.equal(res.statusCode, 400);
+});
+
+test("resend invitation: refuses a disabled employee (never an automatic re-invite)", async () => {
+  let issued = false;
+  const res = response();
+  await withDb(
+    { user: { findUnique: async () => employeeRow({ disabledAt: t("2026-09-25T00:00:00Z") }) } },
+    () =>
+      adminResendEmployeeInvitation(
+        { user: ADMIN, params: { id: "emp1" } },
+        res,
+        undefined,
+        { issueInvitation: async () => { issued = true; return { ok: true, expiresAt: t("2026-09-28T00:00:00Z") }; } },
+      ),
+  );
+  assert.equal(res.statusCode, 400);
+  assert.equal(issued, false);
+});
+
+test("resend invitation: refuses an employee whose invitation was already used", async () => {
+  let issued = false;
+  const res = response();
+  await withDb(
+    {
+      user: { findUnique: async () => employeeRow() },
+      employeeInvitation: { findFirst: async () => ({ id: "inv1", usedAt: t("2026-09-26T00:00:00Z") }) },
+    },
+    () =>
+      adminResendEmployeeInvitation(
+        { user: ADMIN, params: { id: "emp1" } },
+        res,
+        undefined,
+        { issueInvitation: async () => { issued = true; return { ok: true, expiresAt: t("2026-09-28T00:00:00Z") }; } },
+      ),
+  );
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.error, /activated/i, "the message tells the admin the employee already activated");
+  assert.equal(issued, false);
+});
+
+test("resend invitation: refuses an employee who has already signed in", async () => {
+  let issued = false;
+  const res = response();
+  await withDb(
+    { user: { findUnique: async () => employeeRow({ lastActiveAt: t("2026-09-27T00:00:00Z") }) } },
+    () =>
+      adminResendEmployeeInvitation(
+        { user: ADMIN, params: { id: "emp1" } },
+        res,
+        undefined,
+        { issueInvitation: async () => { issued = true; return { ok: true, expiresAt: t("2026-09-28T00:00:00Z") }; } },
+      ),
+  );
+  assert.equal(res.statusCode, 400);
+  assert.equal(issued, false);
+});
+
+test("resend invitation: re-issues only to an awaiting-activation employee and returns only the expiry", async () => {
+  let issuedFor = null;
+  const res = response();
+  await withDb(
+    {
+      user: { findUnique: async () => employeeRow() },
+      employeeInvitation: { findFirst: async () => null },
+    },
+    () =>
+      adminResendEmployeeInvitation(
+        { user: ADMIN, params: { id: "emp1" } },
+        res,
+        undefined,
+        { issueInvitation: async (u) => { issuedFor = u; return { ok: true, expiresAt: t("2026-09-28T00:00:00Z") }; } },
+      ),
+  );
+  assert.equal(res.statusCode, 200);
+  assert.equal(issuedFor.id, "emp1", "the existing invitation issuer is reused for this exact employee");
+  // ONLY the expiry needed by the UI is returned; nothing else.
+  assert.deepEqual(Object.keys(res.body).sort(), ["invitationExpiresAt"]);
+  assert.equal(res.body.invitationExpiresAt instanceof Date, true);
+  const serialized = JSON.stringify(res.body);
+  assert.equal(serialized.includes("rawToken"), false, "the raw token is never returned");
+  assert.equal(serialized.includes("tokenHash"), false, "the token digest is never returned");
+  assert.equal(serialized.includes("password"), false, "no password material is returned");
+});
+
+test("resend invitation: a failed email is a 502 and exposes no new invitation", async () => {
+  let issuedFor = null;
+  const res = response();
+  await withDb(
+    {
+      user: { findUnique: async () => employeeRow() },
+      employeeInvitation: { findFirst: async () => null },
+    },
+    () =>
+      adminResendEmployeeInvitation(
+        { user: ADMIN, params: { id: "emp1" } },
+        res,
+        undefined,
+        { issueInvitation: async (u) => { issuedFor = u; return { ok: false, reason: "MAIL_FAILED" }; } },
+      ),
+  );
+  assert.equal(res.statusCode, 502);
+  assert.equal(issuedFor.id, "emp1", "the issuer was attempted with the intended employee");
+  assert.equal(res.body.invitationExpiresAt, undefined, "no expiry may be reported for an undelivered invitation");
 });

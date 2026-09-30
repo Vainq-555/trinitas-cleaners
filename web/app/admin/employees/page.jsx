@@ -2,16 +2,17 @@
 
 // ADMIN → EMPLOYEES (Phase 2A UI for the existing Phase 2A backend).
 //
-// This page talks ONLY to the four employee-management endpoints the backend
+// This page talks ONLY to the employee-management endpoints the backend
 // already ships:
 //   GET  /admin/employees                list
 //   POST /admin/employees               create + issue single-use invitation
 //   POST /admin/employees/:id/disable   disable (account lifecycle)
 //   POST /admin/employees/:id/reactivate
-// There is intentionally NO resend-invitation control here: the backend does not
-// expose one, and this page must never invent an endpoint. An expired or unused
-// invitation simply leaves an "Invited" employee; the admin re-invites by
-// creating a fresh account only if that is decided on the server side.
+//   POST /admin/employees/:id/resend-invitation  fresh link for an awaiting-activation employee
+// The resend control reuses the backend's single invitation system: it never
+// invents a second token flow, and it never shows, receives or stores a token
+// in this page. An already-activated employee is refused by the server; the
+// admin is told to have the employee sign in instead.
 //
 // Password rules: the admin NEVER sees, sets or receives an employee password.
 // The employee sets their own password through the invitation link (the
@@ -152,6 +153,28 @@ export default function AdminEmployeesPage() {
     }
   };
 
+  const resendInvite = async (employee) => {
+    const msg = `Re-send the activation invitation to ${employee.name} (${employee.email})?\nThe previous link stops working immediately; the new one expires in 24 hours.`;
+    if (!confirm(msg)) return;
+    setBusy(`resend:${employee.id}`);
+    setNotice(null);
+    try {
+      const res = await api(`/admin/employees/${employee.id}/resend-invitation`, { method: "POST" });
+      const expires = res?.invitationExpiresAt ? fmtDateTime(res.invitationExpiresAt) : null;
+      setNotice({
+        tone: "ok",
+        text: expires
+          ? `A new invitation was sent to ${employee.email}; it expires ${expires}.`
+          : `A new invitation was sent to ${employee.email}.`,
+      });
+      await load();
+    } catch (err) {
+      setNotice({ tone: "error", text: err.message });
+    } finally {
+      setBusy("");
+    }
+  };
+
   return (
     <Shell links={links} sections={["Admin Portal"]} title="Employees"
       subtitle="Invite, monitor, and manage employee accounts. Employees set their own passwords.">
@@ -246,7 +269,8 @@ export default function AdminEmployeesPage() {
           {employees.map((e) => {
             const state = employeeState(e);
             const busyKey = e.id;
-            const working = busy === `${busyKey}:disable` || busy === `${busyKey}:reactivate`;
+            const working =
+              busy === `${busyKey}:disable` || busy === `${busyKey}:reactivate` || busy === `resend:${busyKey}`;
             const active = state === "active";
             const disabled = state === "disabled";
             return (
@@ -303,9 +327,18 @@ export default function AdminEmployeesPage() {
                       )}
                     </button>
                   ) : (
-                    <span className="btn btn-outline btn-sm pointer-events-none select-none" title="Awaiting the employee to activate via their invitation link">
-                      <Clock size={14} /> Awaiting activation
-                    </span>
+                    <button
+                      className="btn btn-outline btn-sm"
+                      disabled={working}
+                      onClick={() => resendInvite(e)}
+                      title="Re-send a fresh activation invitation; the previous link stops working"
+                    >
+                      {working && busy === `resend:${busyKey}` ? (
+                        <><RefreshCw size={14} className="animate-spin" /> Resending…</>
+                      ) : (
+                        <><RefreshCw size={14} /> Resend invitation</>
+                      )}
+                    </button>
                   )}
                 </div>
               </article>

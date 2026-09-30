@@ -165,10 +165,14 @@ export async function adminDisableEmployee(req, res) {
   });
 
   // Invalidate any outstanding invitation, so a disabled employee cannot
-  // activate their account while disabled.
-  await prisma.employeeInvitation.updateMany({
+  // activate their account while disabled. The unused rows are DELETED rather
+  // than stamped with `usedAt`: stamping makes the resend handler read a
+  // merely-voided invitation as proof the employee activated, which would
+  // permanently block re-inviting a never-activated employee who is later
+  // reactivated. Consumed invitations (usedAt set) are deliberately left
+  // untouched, so a genuinely activated employee stays identifiable.
+  await prisma.employeeInvitation.deleteMany({
     where: { userId: id, usedAt: null },
-    data: { usedAt: disabledAt },
   });
 
   res.json({ employee: adminEmployeeView(updated) });
@@ -198,4 +202,68 @@ export async function adminReactivateEmployee(req, res) {
   });
 
   res.json({ employee: adminEmployeeView(updated) });
+}
+
+// POST /api/admin/employees/:id/resend-invitation
+//
+// Issues a FRESH single-use invitation for an employee who has not yet
+// activated. This reuses the EXACT same issuer as creation (issueInvitation),
+// so the one-shot invalidation of any previous unused invitation, fresh 24h
+// expiry, the invitation email and the mail-failure cleanup are identical —
+// there is no second invitation system and no new token logic here.
+//
+// Deliberately refused for:
+//   * disabled employees — a disabled account must not self-restore via a new
+//     link; an admin enables it first, then resends, and resend never happens
+//     automatically at reactivation;
+//   * employees who have already activated — any used invitation or a recorded
+//     sign-in means the account already has a usable password; the correct next
+//     step is signing in, not another link.
+export async function adminResendEmployeeInvitation(req, res, _next, deps = defaultDeps) {
+  const { issueInvitation: issue } = deps;
+  if (!requireAdminActor(req, res)) return;
+  const { id } = req.params;
+
+  const employee = await prisma.user.findUnique({ where: { id }, select: employeeSelect });
+  if (!employee) return res.status(404).json({ error: "Employee not found" });
+  if (employee.role !== ROLES.EMPLOYEE) {
+    return badRequest(res, "Target user is not an employee");
+  }
+  if (employee.disabledAt) {
+    return badRequest(res, "A disabled employee cannot be re-invited");
+  }
+
+  // A used invitation (or a recorded sign-in) means the account already has a
+  // usable password: another link would only confuse or, if clicked, silently
+  // reset that password. The cheap sign-in signals are checked first; only then
+  // is the invitation history consulted. Note that `disable` DELETES any
+  // outstanding UNUSED invitation (deleteMany on usedAt: null), so a surviving
+  // used invitation can only mean the account genuinely activated; this offer is
+  // intentionally made only for an ENABLED employee — the disabled case above
+  // already refuses, keeping that administrative staple from turning a
+  // re-activation into a free re-invite.
+  if (employee.lastActiveAt || employee.status === "online") {
+    return badRequest(res, "This employee has already activated their account. Ask them to sign in instead");
+  }
+  const usedInvitation = await prisma.employeeInvitation.findFirst({
+    where: { userId: id, usedAt: { not: null } },
+    select: { id: true },
+  });
+  if (usedInvitation) {
+    return badRequest(res, "This employee has already activated their account. Ask them to sign in instead");
+  }
+
+  const result = await issue(employee);
+  if (!result.ok) {
+    // No account rollback here (unlike creation): the employee row already
+    // exists and is untouched. issueInvitation already deleted the undelivered
+    // token, so nothing redeemable is left behind.
+    return res.status(502).json({
+      error: "Invitation email could not be sent; no new invitation is active",
+    });
+  }
+
+  // The raw token is never returned — only the new expiry, which grants nothing
+  // on its own.
+  res.json({ invitationExpiresAt: result.expiresAt });
 }

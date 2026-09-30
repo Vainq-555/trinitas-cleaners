@@ -179,6 +179,7 @@ router.get("/admin/employees", adminOnly, employees.adminListEmployees);
 router.post("/admin/employees", adminOnly, employees.adminCreateEmployee);
 router.post("/admin/employees/:id/disable", adminOnly, employees.adminDisableEmployee);
 router.post("/admin/employees/:id/reactivate", adminOnly, employees.adminReactivateEmployee);
+router.post("/admin/employees/:id/resend-invitation", adminOnly, employees.adminResendEmployeeInvitation);
 
 // Assign an accepted booking to an employee. Writes only BookingAssignment:
 // Booking.customerId and Booking.scheduledStartAt are never modified.
