@@ -107,16 +107,7 @@ export async function listMyShifts(req, res) {
       },
     },
     orderBy: [{ booking: { date: "asc" } }, { id: "asc" }],
-    select: {
-      ...shiftSelect,
-      assignment: {
-        select: {
-          employeeId: true,
-          scheduledStartAt: true,
-          visibleToEmployee: true,
-        },
-      },
-    },
+    select: { ...shiftSelect },
   });
 
   // This employee's own request per shift, so the page can show Requested /
