@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import {
   LEAVE_KINDS,
   LEAVE_REQUEST_DISCLAIMER,
@@ -16,6 +17,11 @@ import {
   leaveStatusLabel,
   sortLeaveByCreatedDesc,
   sortLeaveForAdmin,
+  groupLeaveByWhen,
+  isLeavePast,
+  sortLeaveHistory,
+  sortLeaveUpcoming,
+  todayLeaveDay,
 } from "../lib/employeeLeave.mjs";
 
 // EMPLOYEE LEAVE REQUESTS — employee/admin UI helpers and production wiring.
@@ -336,4 +342,244 @@ test("leave: neither screen re-derives authorization in the browser", () => {
   assert.match(code(ADMIN_PAGE), /import \{ api \} from "@\/lib\/api"/);
   // A 401/403 from either flow is reported, never worked around in the browser.
   assert.match(code(EMPLOYEE_PAGE) + code(ADMIN_PAGE), /401|403/);
+});
+
+// ---------------------------------------------------------------------------
+// CURRENT & UPCOMING vs LEAVE HISTORY
+//
+// A leave that ended last year must not sit next to one that starts next month.
+// These tests pin the split, the boundary, both orderings, and — most importantly —
+// that grouping is a VIEW: it never deletes a request and never changes a status.
+// ---------------------------------------------------------------------------
+
+const TODAY = "2026-10-02"; // a fixed "today", so nothing here depends on the clock
+
+const leave = (over = {}) => ({ id: "lv", startsOn: "2026-10-02", endsOn: "2026-10-02", kind: "vacation", note: null, status: "requested", decidedAt: null, createdAt: "2026-09-01T00:00:00.000Z", ...over });
+
+test("leave: today is read as the viewer's LOCAL calendar day", () => {
+  assert.equal(todayLeaveDay(new Date(2026, 9, 2, 0, 0, 0)), "2026-10-02", "local midnight");
+  assert.equal(todayLeaveDay(new Date(2026, 9, 2, 23, 59, 59)), "2026-10-02", "last minute of the local day");
+  assert.equal(todayLeaveDay(new Date(2026, 11, 31, 12, 0, 0)), "2026-12-31");
+  // Single-digit month and day are zero padded, so it stays comparable as a string.
+  assert.match(todayLeaveDay(new Date(2026, 0, 5)), /^2026-01-05$/);
+  assert.equal(todayLeaveDay(new Date("nonsense")), null);
+  assert.equal(todayLeaveDay("nonsense"), null);
+  assert.match(todayLeaveDay(), /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test("leave: leave ending TODAY is still current, not history", () => {
+  // The boundary the employee would expect: today is not yet over.
+  assert.equal(isLeavePast(leave({ endsOn: TODAY }), TODAY), false);
+  const { current, history } = groupLeaveByWhen([leave({ endsOn: TODAY })], TODAY);
+  assert.deepEqual(current.map((r) => r.id), ["lv"]);
+  assert.equal(history.length, 0);
+});
+
+test("leave: only an end date strictly before today is history", () => {
+  const spans = [
+    ["yesterday", "2026-10-01", true],
+    ["tomorrow", "2026-10-03", false],
+    ["today", "2026-10-02", false],
+    ["far past", "2020-01-01", true],
+    ["far future", "2099-12-31", false],
+  ];
+  for (const [label, endsOn, expected] of spans) {
+    assert.equal(isLeavePast(leave({ endsOn }), TODAY), expected, `${label} (${endsOn})`);
+  }
+  // A multi-day leave that is still running is current, and so is one that ENDS
+  // today even though it started last month.
+  assert.equal(isLeavePast(leave({ startsOn: "2026-09-20", endsOn: "2026-10-05" }), TODAY), false);
+  assert.equal(isLeavePast(leave({ startsOn: "2026-09-20", endsOn: TODAY }), TODAY), false);
+  // The year boundary is just another day boundary.
+  assert.equal(isLeavePast(leave({ startsOn: "2025-12-30", endsOn: "2026-01-02" }), "2026-01-01"), false);
+  assert.equal(isLeavePast(leave({ startsOn: "2025-12-30", endsOn: "2025-12-31" }), "2026-01-01"), true);
+});
+
+test("leave: a request we cannot place in time stays visible rather than disappearing", () => {
+  // The safe direction: an unreadable or missing end date must NOT be filed away
+  // into history, and must not be dropped either.
+  for (const endsOn of [null, undefined, "", "not-a-date", "2026-02-30", "20261002", 20261002]) {
+    assert.equal(isLeavePast(leave({ endsOn }), TODAY), false, `endsOn=${String(endsOn)}`);
+  }
+  // A missing/invalid "today" disables the split rather than marking everything past.
+  assert.equal(isLeavePast(leave({ endsOn: "2020-01-01" }), null), false);
+  assert.equal(isLeavePast(leave({ endsOn: "2020-01-01" }), "nonsense"), false);
+  // Every such row still appears in one of the two sections.
+  const { current, history } = groupLeaveByWhen([leave({ id: "a", endsOn: null }), leave({ id: "b" })], TODAY);
+  assert.equal(current.length + history.length, 2);
+});
+
+test("leave: grouping splits by end date and loses nothing", () => {
+  const rows = [
+    leave({ id: "past-approved", startsOn: "2026-08-01", endsOn: "2026-08-05", status: "approved" }),
+    leave({ id: "ends-today", startsOn: "2026-09-28", endsOn: TODAY, status: "approved" }),
+    leave({ id: "future", startsOn: "2026-12-24", endsOn: "2026-12-26", status: "requested" }),
+    leave({ id: "past-declined", startsOn: "2026-07-01", endsOn: "2026-07-02", status: "declined" }),
+  ];
+  const { current, history } = groupLeaveByWhen(rows, TODAY);
+
+  assert.deepEqual(current.map((r) => r.id).sort(), ["ends-today", "future"]);
+  assert.deepEqual(history.map((r) => r.id).sort(), ["past-approved", "past-declined"]);
+  // Nothing is dropped and nothing is duplicated: the union is the input.
+  assert.equal(current.length + history.length, rows.length);
+  assert.deepEqual([...current, ...history].map((r) => r.id).sort(), rows.map((r) => r.id).sort());
+  // The rows themselves are handed back untouched — grouping does not rewrite them.
+  for (const original of rows) {
+    const found = [...current, ...history].find((r) => r.id === original.id);
+    assert.deepEqual(found, original);
+  }
+  // An empty or absent list is still safe.
+  assert.deepEqual(groupLeaveByWhen([], TODAY), { current: [], history: [] });
+  assert.deepEqual(groupLeaveByWhen(null, TODAY), { current: [], history: [] });
+});
+
+test("leave: current & upcoming are ordered nearest first", () => {
+  const rows = [
+    leave({ id: "far", startsOn: "2027-03-01", endsOn: "2027-03-05" }),
+    leave({ id: "running", startsOn: "2026-09-20", endsOn: "2026-10-06" }),
+    leave({ id: "soonest", startsOn: TODAY, endsOn: TODAY }),
+  ];
+  assert.deepEqual(sortLeaveUpcoming(rows).map((r) => r.id), ["running", "soonest", "far"]);
+  // A leave already under way comes before one that has not begun — the ordering
+  // that matches "what is happening next".
+  const grouped = groupLeaveByWhen(rows, TODAY).current;
+  assert.deepEqual(grouped.map((r) => r.id), ["running", "soonest", "far"]);
+  // Sorting is pure and never drops a row.
+  assert.deepEqual(rows.map((r) => r.id), ["far", "running", "soonest"]);
+  // An undated row sorts last instead of jumping to the front.
+  assert.equal(sortLeaveUpcoming([leave({ id: "no-start", startsOn: undefined }), leave({ id: "dated", startsOn: "2026-10-01" })])[0].id, "dated");
+});
+
+test("leave: history is ordered most recently ended first", () => {
+  const rows = [
+    leave({ id: "oldest", endsOn: "2025-11-30" }),
+    leave({ id: "newest", endsOn: "2026-09-30" }),
+    leave({ id: "middle", endsOn: "2026-06-15" }),
+  ];
+  assert.deepEqual(sortLeaveHistory(rows).map((r) => r.id), ["newest", "middle", "oldest"]);
+  assert.deepEqual(rows.map((r) => r.id), ["oldest", "newest", "middle"]);
+  assert.deepEqual(groupLeaveByWhen(rows, TODAY).history.map((r) => r.id), ["newest", "middle", "oldest"]);
+});
+
+test("leave: a past APPROVED request stays in history and stays approved", () => {
+  // The two requirements that must never regress: history is a view, not a
+  // lifecycle. Dates passing does not edit, decline, or hide anything.
+  const decided = leave({
+    id: "past-approved",
+    startsOn: "2026-08-01",
+    endsOn: "2026-08-05",
+    status: "approved",
+    decidedAt: "2026-07-20T10:00:00.000Z",
+  });
+  const { current, history } = groupLeaveByWhen([decided], TODAY);
+
+  assert.equal(current.length, 0, "an ended request is not listed as current");
+  assert.equal(history.length, 1, "but it is still there");
+  const shown = history[0];
+  assert.equal(shown.status, "approved", "status is untouched by the dates");
+  assert.equal(shown.decidedAt, "2026-07-20T10:00:00.000Z", "the decision is still shown");
+  assert.equal(leaveStatusLabel(shown.status), "Approved");
+  assert.equal(isPendingLeave(shown), false, "it did not become pending again");
+  assert.match(leaveDecisionLabel(shown), /Approv/);
+  // And it is never silently removed from the list.
+  assert.match(leaveRangeLabel(shown), /1 Aug 2026/);
+});
+
+test("leave: grouping never rewrites a status in either direction", () => {
+  const rows = [
+    leave({ id: "a", endsOn: "2020-01-01", status: "requested" }),
+    leave({ id: "b", endsOn: "2020-01-01", status: "approved" }),
+    leave({ id: "c", endsOn: "2020-01-01", status: "declined" }),
+    leave({ id: "d", endsOn: TODAY, status: "requested" }),
+    leave({ id: "e", endsOn: TODAY, status: "approved" }),
+    leave({ id: "f", endsOn: TODAY, status: "declined" }),
+  ];
+  const before = rows.map((r) => `${r.id}:${r.status}`).sort();
+  const { current, history } = groupLeaveByWhen(rows, TODAY);
+  const after = [...current, ...history].map((r) => `${r.id}:${r.status}`).sort();
+  assert.deepEqual(after, before, "every status survives grouping unchanged");
+  // Each section keeps all three meanings available.
+  assert.equal(new Set([...current, ...history].map((r) => r.status)).size, 3);
+});
+
+test("leave: the boundary holds under a far-off timezone", () => {
+  // The whole off-by-one risk: a viewer whose clock is a day ahead or behind must
+  // still see a leave ending "today" as current, because the stored day is a
+  // wall-clock "YYYY-MM-DD" and never an instant. Run in a child process so the
+  // machine timezone cannot mask it.
+  const script = `
+    import { groupLeaveByWhen, isLeavePast } from ${JSON.stringify(new URL("../lib/employeeLeave.mjs", import.meta.url).href)};
+    const day = (d) => "2026-10-0" + d;
+    const out = [];
+    for (const endsOn of [day(1), day(2), day(3)]) {
+      const { current, history } = groupLeaveByWhen(
+        [{ id: "r", startsOn: endsOn, endsOn, status: "approved", createdAt: "2026-09-01T00:00:00.000Z" }],
+        day(2),
+      );
+      out.push([endsOn, isLeavePast({ endsOn }, day(2)), current.length, history.length].join(":"));
+    }
+    console.log(JSON.stringify(out));
+  `;
+  const results = {};
+  for (const tz of ["UTC", "Pacific/Kiritimati", "Pacific/Midway", "America/Chicago", "Asia/Tokyo"]) {
+    const out = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+      env: { ...process.env, TZ: tz },
+      encoding: "utf8",
+    });
+    results[tz] = JSON.parse(out.trim().split("\n").pop());
+  }
+  // Identical in every timezone: yesterday=history, today=current, tomorrow=current.
+  const expected = ["2026-10-01:true:0:1", "2026-10-02:false:1:0", "2026-10-03:false:1:0"];
+  for (const [tz, got] of Object.entries(results)) {
+    assert.deepEqual(got, expected, `TZ=${tz} must classify identically`);
+  }
+});
+
+// ---- the page uses the split, and only the split ----
+
+test("leave: the employee page renders both sections from the same grouping", () => {
+  const page = code(EMPLOYEE_PAGE);
+  assert.match(page, /groupLeaveByWhen/, "the page must split on the end date");
+  assert.match(page, /Current & Upcoming Leave/);
+  assert.match(page, /Leave History/);
+  // A single shared card component renders both sections, so a history row carries
+  // exactly the same information as a current one.
+  assert.match(page, /function LeaveCard/);
+  assert.match(page, /function LeaveSection/);
+  // Still every piece of information requirement asks for, in the card.
+  assert.match(page, /leaveStatusLabel\(request\.status\)/, "status stays visible");
+  assert.match(page, /leaveRangeLabel\(request\)/, "date range stays visible");
+  assert.match(page, /leaveKindLabel\(request\)/, "leave type stays visible");
+  assert.match(page, /request\.note/, "note stays visible");
+  assert.match(page, /leaveDecisionLabel\(request\)/, "decision info stays visible");
+  // And the empty state is preserved for a genuinely empty list.
+  assert.match(page, /LEAVE_EMPTY_TITLE/);
+  assert.match(page, /LEAVE_EMPTY_BODY/);
+  assert.match(page, /current\.length === 0 && history\.length === 0/);
+});
+
+test("leave: the grouping is display-only — no status is derived from a date", () => {
+  const page = code(EMPLOYEE_PAGE);
+  const helper = code("../lib/employeeLeave.mjs");
+  for (const [name, src] of [["page", page], ["helpers", helper]]) {
+    // No date may rewrite a status, and nothing may be sent or deleted.
+    assert.equal(/status\s*[:=]\s*[^,}]*isLeavePast/.test(src), false, `${name} must not set status from a date`);
+    assert.equal(/status\s*=\s*["'](approved|declined|requested)["']/.test(src), false, `${name} must not assign a status`);
+    assert.equal(/method:\s*["'](PUT|PATCH|DELETE)["']/.test(src), false, `${name} must not mutate anything`);
+    assert.equal(/\bdecidedById\b/.test(src), false, `${name} must not touch the decision fields`);
+  }
+  // isLeavePast returns a boolean and only reads endsOn/today: it is a predicate,
+  // never a mutation.
+  assert.match(helper, /export function isLeavePast\(request, today\)/);
+});
+
+test("leave: no new field or endpoint was introduced for the split", () => {
+  const page = code(EMPLOYEE_PAGE);
+  const hook = code(HOOK);
+  // The split reads `endsOn`, which the existing GET already returns. No new query,
+  // no new param, no client-side "isPast" the server would have to agree with.
+  assert.match(page, /endsOn/);
+  assert.equal(/isPast|archived|hideOld|showHistory\s*=/.test(page + hook), false);
+  assert.match(hook, /["'`]\/employee\/leave["'`]/, "the same single endpoint as before");
+  assert.equal(/admin\/leave/.test(page + hook), false, "the admin workflow is untouched");
 });

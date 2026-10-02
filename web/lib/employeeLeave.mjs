@@ -163,3 +163,86 @@ export function sortLeaveForAdmin(requests) {
     return ap - bp;
   });
 }
+
+// ---------------------------------------------------------------------------
+// CURRENT / UPCOMING vs HISTORY
+// ---------------------------------------------------------------------------
+//
+// An employee's list used to be one flat run ordered by when it was FILED, which
+// buried a leave that ends next month under one from last March. These helpers
+// split the same requests into "still ahead of you" and "already behind you", and
+// order each section by the dates that matter.
+//
+// NOTHING IS MUTATED AND NO STATUS CHANGES. `endsOn` is already sent by the API, so
+// this needs no new field and no migration, and grouping is presentational only: an
+// approved request that has now ended stays APPROVED and stays visible, it simply
+// moves into the history section. No request is ever hidden or dropped — the two
+// sections always contain exactly the rows that came in.
+
+// "Today" as the employee sees it: the viewer's LOCAL calendar day. This is the
+// only place in the module that reads the local clock, and it is deliberate — an
+// employee's own "today" is the local day. The returned value is a plain
+// "YYYY-MM-DD" string so it can be compared with a stored day directly.
+export function todayLeaveDay(now = new Date()) {
+  const d = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Is this request already over?
+//
+// The rule is the boundary the employee would expect: leave ending TODAY is still
+// current, and only an end date strictly before today is history. `2026-10-02` and
+// `2026-10-03` compare the same whether read as strings or as instants, so the
+// stored wall-clock day is never re-interpreted in the viewer's timezone (no
+// off-by-one at a DST or zone boundary).
+//
+// A request whose end date is missing or unparseable is treated as NOT past. That
+// is the safe direction: a request we cannot place must stay plainly visible rather
+// than be filed away out of sight.
+export function isLeavePast(request, today) {
+  const endsOn = request?.endsOn;
+  if (typeof endsOn !== "string" || parseDay(endsOn) === null) return false;
+  if (typeof today !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return false;
+  return endsOn < today;
+}
+
+// Current & upcoming first: the nearest one first. Ordering by the START date keeps
+// a leave already under way above one that begins months from now, which is the
+// order that matches "what is happening next".
+export function sortLeaveUpcoming(requests) {
+  return [...(Array.isArray(requests) ? requests : [])].sort((a, b) => {
+    const as = typeof a?.startsOn === "string" ? a.startsOn : "";
+    const bs = typeof b?.startsOn === "string" ? b.startsOn : "";
+    if (as === bs) return 0;
+    // An undated row sorts last rather than jumping to the front.
+    if (!as) return 1;
+    if (!bs) return -1;
+    return as < bs ? -1 : 1;
+  });
+}
+
+// History: the most recently ENDED first, so last year's leave recedes downward.
+export function sortLeaveHistory(requests) {
+  return [...(Array.isArray(requests) ? requests : [])].sort((a, b) => {
+    const ae = typeof a?.endsOn === "string" ? a.endsOn : "";
+    const be = typeof b?.endsOn === "string" ? b.endsOn : "";
+    if (ae === be) return 0;
+    if (!ae) return 1;
+    if (!be) return -1;
+    return ae > be ? -1 : 1;
+  });
+}
+
+// The split the page renders. Every input row lands in exactly one of the two
+// lists, with `status`, `kind`, `note` and the decision fields carried through
+// untouched — the caller receives the SAME request objects.
+export function groupLeaveByWhen(requests, today = todayLeaveDay()) {
+  const all = Array.isArray(requests) ? requests : [];
+  const current = [];
+  const history = [];
+  for (const request of all) {
+    (isLeavePast(request, today) ? history : current).push(request);
+  }
+  return { current: sortLeaveUpcoming(current), history: sortLeaveHistory(history) };
+}
