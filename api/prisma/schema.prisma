@@ -88,6 +88,8 @@ model User {
   shiftRequests    ShiftRequest[]         @relation("ShiftRequestEmployee")
   shiftOffersMade  ShiftOffer[]           @relation("ShiftOfferCreator")
   shiftDecisions   ShiftRequest[]         @relation("ShiftRequestDecider")
+  leaveRequests    EmployeeLeaveRequest[] @relation("LeaveRequestEmployee")
+  leaveDecisions   EmployeeLeaveRequest[] @relation("LeaveRequestDecider")
 
   @@index([role])
 }
@@ -816,6 +818,59 @@ model ShiftRequest {
   // read-then-write race in application code.
   @@unique([shiftId, employeeId])
   @@index([employeeId, status])
+}
+
+// ---------------------------------------------------------------------------
+// EMPLOYEE LEAVE REQUESTS
+//
+// A formal request for time off, approved or declined by an admin. This is a
+// SEPARATE system from EmployeeAvailability on purpose, so neither becomes a
+// competing source of truth:
+//   * EmployeeAvailability — the employee's own stated PREFERENCE ("when I can
+//     work"). Informational, approved by nobody, creates no work.
+//   * EmployeeLeaveRequest — a REQUEST FOR TIME OFF that only an admin may decide.
+// Approving leave deliberately does NOT write an availability row: a preference the
+// employee stated and a decision an admin made are different facts, and syncing them
+// would let either silently overwrite the other.
+//
+// A leave request never creates work: BookingAssignment remains the only source of
+// truth for an actual assignment, exactly as for a shift request.
+// ---------------------------------------------------------------------------
+model EmployeeLeaveRequest {
+  id         String   @id @default(cuid())
+  employeeId String
+  // Inclusive calendar-day span as an America/Chicago "YYYY-MM-DD" WALL-CLOCK
+  // string — the same convention as EmployeeAvailability.date and the customer
+  // appointment picker. A leave day is a day, not an instant, so no UTC conversion
+  // (which could shift a leave across a day boundary) is applied.
+  // startsOn === endsOn is a genuine ONE-DAY leave.
+  startsOn   String
+  endsOn     String
+  // Optional. NULL is a valid request ("I am off these days"); the buckets are
+  // bounded in config.js (LEAVE_KIND) so this column cannot grow free text.
+  kind       String?
+  note       String?
+  // "requested" | "approved" | "declined". A request is only ever "requested" on
+  // creation, only an admin approve/decline moves it, and a decided request is
+  // never re-decided.
+  status     String   @default("requested")
+  decidedAt  DateTime?
+  decidedById String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  // employeeId CASCADE, matching ShiftRequest.employeeId: a request is meaningless
+  // without its employee. Safe for history because an employee User row is NEVER
+  // deleted — DELETE /auth/account refuses employee accounts and the admin-only
+  // disable clears disabledAt instead of removing the row — so the employee's
+  // assignments and history can never cascade away.
+  employee   User     @relation("LeaveRequestEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  // decidedById SET NULL, matching ShiftRequest.decidedById: removing the deciding
+  // admin must never erase the decision or its timestamp.
+  decidedBy  User?    @relation("LeaveRequestDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  // The employee's own portal list (server-scoped read on every load).
+  @@index([employeeId, status])
+  // The admin's pending-first queue.
+  @@index([status])
 }
 
 // ---------------------------------------------------------------------------

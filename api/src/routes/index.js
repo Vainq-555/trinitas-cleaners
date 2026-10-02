@@ -25,6 +25,7 @@ import * as employees from "../controllers/employees.js";
 import * as assignments from "../controllers/assignments.js";
 import * as availability from "../controllers/availability.js";
 import * as shifts from "../controllers/shifts.js";
+import * as employeeLeave from "../controllers/employeeLeave.js";
 import * as employeeCommunity from "../controllers/employeeCommunity.js";
 
 const router = Router();
@@ -148,6 +149,15 @@ router.get("/employee/shifts", authenticate, requireEmployee, shifts.listMyShift
 router.get("/employee/shifts/requests", authenticate, requireEmployee, shifts.listMyShiftRequests);
 router.post("/employee/shifts/:id/request", authenticate, requireEmployee, shifts.requestShift);
 
+// EMPLOYEE LEAVE REQUESTS. A formal request for time off, decided by an admin.
+//
+// Separate from availability on purpose: availability is the employee's own
+// preference ("when I can work") and needs no approval, while leave is a request
+// that only an admin may approve or decline. Neither endpoint writes the other, so
+// there is no competing source of truth, and neither creates or changes any work.
+router.get("/employee/leave", authenticate, requireEmployee, employeeLeave.listMyLeaveRequests);
+router.post("/employee/leave", authenticate, requireEmployee, employeeLeave.createMyLeaveRequest);
+
 // Employee community (Phase 2B-5). `authenticate` + `requireEmployee` on both,
 // exactly like every employee route above: a disabled employee's existing
 // session stops working on its next request, and a customer or admin is refused
@@ -193,6 +203,13 @@ router.post("/admin/bookings/:id/assignment", adminOnly, assignments.adminAssign
 // /admin/bookings/:id/assignment (shared `applyBookingAssignment`), so an
 // approval is never a second, laxer way to assign work.
 router.get("/admin/availability", adminOnly, availability.adminListAvailability);
+
+// The admin leave queue. A decision records `decidedAt`/`decidedById` from the
+// authenticated session only, can be made exactly once, and never creates, cancels
+// or reassigns work of any kind.
+router.get("/admin/leave", adminOnly, employeeLeave.adminListLeaveRequests);
+router.post("/admin/leave/:id/approve", adminOnly, employeeLeave.adminApproveLeaveRequest);
+router.post("/admin/leave/:id/decline", adminOnly, employeeLeave.adminDeclineLeaveRequest);
 router.get("/admin/shifts", adminOnly, shifts.adminListShifts);
 router.get("/admin/shifts/candidates", adminOnly, shifts.adminListShiftCandidates);
 router.post("/admin/shifts", adminOnly, shifts.adminCreateShift);

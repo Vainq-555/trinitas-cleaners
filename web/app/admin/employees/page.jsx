@@ -30,6 +30,7 @@ import {
   LayoutDashboard, Users, CalendarCheck, Star, BadgeDollarSign, Wrench,
   Store, BadgePercent, ReceiptText, MessageSquare, MessageCircle, UsersRound,
   BookOpen, Plus, RefreshCw, Ban, UserCheck, Phone, Mail, ShieldAlert, Clock,
+  CalendarOff,
 } from "lucide-react";
 import Shell from "@/components/Shell";
 import { api, fmtDateTime } from "@/lib/api";
@@ -45,6 +46,9 @@ const links = [
   { href: "/admin/business", label: "Business Info", icon: Store },
   { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
   { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
+  // Employee leave requests are decided from the admin queue, next to the employees
+  // they belong to.
+  { href: "/admin/leave", label: "Leave", icon: CalendarOff },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
   { href: "/admin/community", label: "Community", icon: MessageCircle },
   { href: "/admin/broadcasts", label: "Broadcasts", icon: BookOpen },

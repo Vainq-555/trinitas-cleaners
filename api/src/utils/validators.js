@@ -5,6 +5,7 @@ import {
   BROADCAST_TARGET,
   BROADCAST_TYPE,
   COMMUNITY_AUDIENCE,
+  LEAVE_KIND,
   REVIEW_STATUS,
   ROLES,
 } from "../config.js";
@@ -221,6 +222,34 @@ export function isValidAvailabilityWindow({ date, startTime, endTime } = {}) {
   if (!isValidDateString(date)) return false;
   if (!isValidTimeString(startTime) || !isValidTimeString(endTime)) return false;
   return startTime < endTime;
+}
+
+// ---------------------------------------------------------------------------
+// Employee leave requests
+// ---------------------------------------------------------------------------
+
+// An OPTIONAL leave kind. Absence is valid, so undefined/null/"" pass; a kind that
+// IS supplied must be one of the known buckets. A non-string is rejected rather
+// than coerced, so an object cannot be stored in a TEXT column.
+export function isValidLeaveKind(v) {
+  if (v === undefined || v === null || v === "") return true;
+  return typeof v === "string" && LEAVE_KIND.includes(v);
+}
+
+// A leave range is a real calendar day or span of days, inclusive of both ends.
+//
+// The date FORMAT is not re-invented: both ends go through the single source of
+// truth in utils/schedule.js, the same America/Chicago wall-clock "YYYY-MM-DD"
+// calendar day the customer appointment picker and EmployeeAvailability.date use.
+// Because the format is a zero-padded, validated calendar day, comparing the two
+// strings compares the days themselves — so "end before start" is caught without
+// any timezone conversion that could shift a leave by a day.
+//
+// startsOn === endsOn IS valid here: that is a genuine one-day leave, unlike an
+// availability window where a zero-length range is always a typo.
+export function isValidLeaveRange({ startsOn, endsOn } = {}) {
+  if (!isValidDateString(startsOn) || !isValidDateString(endsOn)) return false;
+  return startsOn <= endsOn;
 }
 
 // An optional free-text note, shared by availability windows and shift requests

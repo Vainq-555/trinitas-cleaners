@@ -39,6 +39,27 @@ export const AVAILABILITY_KIND_DEFAULT = "available";
 // creates a BookingAssignment.
 export const SHIFT_REQUEST_STATUS = ["requested", "approved", "declined"];
 export const SHIFT_REQUEST_STATUS_DEFAULT = "requested";
+
+// EMPLOYEE LEAVE REQUESTS.
+//
+// LEAVE IS NOT AVAILABILITY, and the two are deliberately kept as separate systems
+// with separate tables so neither becomes a competing source of truth:
+//   * EmployeeAvailability is the employee's own PREFERENCE ("when I can work").
+//     It is informational, needs no approval, and creates no work.
+//   * EmployeeLeaveRequest is a formal REQUEST for time OFF, which only an admin
+//     may approve or decline. It never creates work either: BookingAssignment
+//     remains the only source of truth for actual assignments.
+// Approving a leave request does NOT rewrite EmployeeAvailability, because a
+// preference the employee stated and a decision an admin made are different facts
+// and collapsing them would let one overwrite the other.
+//
+// A request is only ever "requested" on creation. Only an admin approve/decline
+// moves it to a decision, and a decided request can never be re-decided.
+export const LEAVE_REQUEST_STATUS = ["requested", "approved", "declined"];
+export const LEAVE_REQUEST_STATUS_DEFAULT = "requested";
+// `kind` is OPTIONAL. Absence is a valid request (a plain "I am off these days"),
+// so a missing/empty kind is stored as NULL rather than being forced into a bucket.
+export const LEAVE_KIND = ["vacation", "sick", "personal", "other"];
 export const REVIEW_STATUS = ["pending", "approved", "rejected"];
 
 // COMMUNITY AUDIENCE — Phase 2B-5. The community chat wall is served to TWO

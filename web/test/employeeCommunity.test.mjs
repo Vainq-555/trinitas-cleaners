@@ -340,7 +340,7 @@ const navHrefs = [...navCode.matchAll(/href:\s*"(\/employee[^"]*)"/g)].map((m) =
 
 test("NAV: the employee nav links to the community it actually has", () => {
   assert.ok(navHrefs.includes("/employee/community"), "the community must be reachable from the employee nav");
-  assert.equal(navHrefs.length, 7, "exactly the seven destinations that exist");
+  assert.equal(navHrefs.length, 8, "exactly the eight destinations that exist");
   assert.equal(new Set(navHrefs).size, navHrefs.length, "no duplicate destinations");
   for (const href of navHrefs) {
     assert.equal(/\/employee\/profile|\/employee\/time|\/employee\/payments/.test(href), false);
