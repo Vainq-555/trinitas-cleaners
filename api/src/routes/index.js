@@ -27,6 +27,7 @@ import * as availability from "../controllers/availability.js";
 import * as shifts from "../controllers/shifts.js";
 import * as employeeLeave from "../controllers/employeeLeave.js";
 import * as employeeCommunity from "../controllers/employeeCommunity.js";
+import * as employeeResignation from "../controllers/employeeResignation.js";
 
 const router = Router();
 
@@ -170,6 +171,26 @@ router.post("/employee/leave", authenticate, requireEmployee, employeeLeave.crea
 router.get("/employee/community/messages", authenticate, requireEmployee, employeeCommunity.listMyEmployeeCommunityMessages);
 router.post("/employee/community/messages", authenticate, requireEmployee, employeeCommunity.createEmployeeCommunityMessage);
 
+// EMPLOYEE RESIGNATION REQUESTS — submission only.
+//
+// `authenticate` + `requireEmployee`, like every other employee route: a disabled
+// employee's existing session stops being authorized on its next request, and a
+// customer or admin is refused before the handler runs.
+//
+// There is deliberately NO parameter that names an employee. The handler takes the
+// employee from `req.user.id`, so an employee cannot file a resignation on
+// somebody else's behalf.
+//
+// The one-request-at-a-time rule is enforced by a partial unique index over the
+// requesting employee scoped to status = 'requested' (created in the resignation
+// migration; named in prisma/schema.prisma), not by a read-then-write check, so
+// concurrent submissions cannot both win; the handler catches that unique
+// violation and returns a 409.
+//
+// The admin decision routes are registered below, behind `adminOnly`, and are the
+// only way a resignation can leave "requested".
+router.post("/employee/resignation", authenticate, requireEmployee, employeeResignation.createMyResignationRequest);
+
 // ---------- Admin ----------
 const adminOnly = [authenticate, requireAdmin];
 
@@ -190,6 +211,18 @@ router.post("/admin/employees", adminOnly, employees.adminCreateEmployee);
 router.post("/admin/employees/:id/disable", adminOnly, employees.adminDisableEmployee);
 router.post("/admin/employees/:id/reactivate", adminOnly, employees.adminReactivateEmployee);
 router.post("/admin/employees/:id/resend-invitation", adminOnly, employees.adminResendEmployeeInvitation);
+
+// Employee resignation requests. Admin-only, like every other admin route, and the
+// handler re-checks the caller's role in-handler as defence in depth.
+//
+// Approving one ENDS the employment relationship, so it is deliberately explicit
+// and never silent: it refuses (409 ORPHANED_ASSIGNMENTS) while the employee still
+// holds accepted bookings unless the admin confirms abandoning them with a reason.
+// The approval flips User.role "employee" -> "customer" — it does NOT disable the
+// account, and it does NOT delete it — and declines that employee's still-pending
+// shift requests in the same transaction, reporting how many.
+router.get("/admin/resignation", adminOnly, employeeResignation.adminListResignationRequests);
+router.post("/admin/resignation/:id/approve", adminOnly, employeeResignation.adminApproveResignationRequest);
 
 // Assign an accepted booking to an employee. Writes only BookingAssignment:
 // Booking.customerId and Booking.scheduledStartAt are never modified.

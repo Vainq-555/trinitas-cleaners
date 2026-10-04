@@ -77,6 +77,22 @@ export async function login(req, res) {
     return res.status(401).json({ error: "Invalid email or password" });
   }
 
+  // A DISABLED account is refused only AFTER the password has verified, and this
+  // is deliberate on both sides of that ordering:
+  //
+  //   - After, so a wrong password (or an unknown email) still fails with the
+  //     generic "Invalid email or password". Checking disabledAt first would let
+  //     anyone learn which emails belong to a disabled account, just by reading
+  //     the difference between the two responses.
+  //   - Before the presence write and before the token/cookie, so a disabled
+  //     account is never marked online, has lastActiveAt left untouched, and
+  //     receives no session at all.
+  //
+  // The wording matches `authenticate` (middleware/auth.js), which refuses any
+  // already-issued token on the very next request, so a disabled account is told
+  // the same thing whether it signs in or presents a stale session.
+  if (user.disabledAt) return res.status(401).json({ error: "Account is disabled" });
+
   const updated = await prisma.user.update({
     where: { id: user.id },
     data: { status: "online", lastActiveAt: new Date() },
@@ -137,6 +153,35 @@ export async function deleteAccount(req, res) {
   // an employee from cascading away history that must be preserved.
   if (req.user.role === ROLES.EMPLOYEE) {
     return badRequest(res, "Employee accounts cannot be deleted; an administrator manages employee access");
+  }
+  // A FORMER employee is protected exactly the same way, even though their role is
+  // now "customer" and so no longer matches the check above.
+  //
+  // Why this is a separate check rather than a role check: an approved resignation
+  // transitions the role to "customer", so role alone can no longer tell "a person
+  // who was never an employee" from "an employee whose employment has ended".
+  // Inferring it from the role would forbid self-deletion for every ordinary
+  // customer, so it is NOT done. The approved resignation request is the actual
+  // source of truth for "this account carries employment records that must
+  // survive", and the role transition deliberately added no User column that could
+  // answer the question on its own.
+  //
+  // Without this, the role flip would quietly reopen self-deletion for someone whose
+  // User row is the anchor for their assignment history: deleting it cascades that
+  // history away, which is exactly what the employee rule above exists to prevent.
+  //
+  // Existence only — the index is (employeeId, status), and the projection is a
+  // single id, so this is an index-only lookup rather than a history read. No
+  // ordering is needed: the question is whether ANY approved request exists, so
+  // which one is newest is irrelevant. `employeeId` is `req.user.id` and nothing is
+  // read from the body, query or path, so this can only ever describe the caller's
+  // OWN employment history and cannot be pointed at another account.
+  const approvedResignation = await prisma.employeeResignationRequest.findFirst({
+    where: { employeeId: req.user.id, status: "approved" },
+    select: { id: true },
+  });
+  if (approvedResignation) {
+    return badRequest(res, "This account cannot be deleted; an administrator manages employee records");
   }
   await prisma.user.delete({ where: { id: req.user.id } });
   res.clearCookie(COOKIE_NAME, { path: "/" });

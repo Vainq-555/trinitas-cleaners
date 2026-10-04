@@ -60,6 +60,29 @@ export const LEAVE_REQUEST_STATUS_DEFAULT = "requested";
 // `kind` is OPTIONAL. Absence is a valid request (a plain "I am off these days"),
 // so a missing/empty kind is stored as NULL rather than being forced into a bucket.
 export const LEAVE_KIND = ["vacation", "sick", "personal", "other"];
+
+// EMPLOYEE RESIGNATION REQUESTS.
+//
+// A resignation is an employee's request to END the employment relationship. It is
+// its own system, separate from leave (time off) and from availability (a work
+// preference): a resignation is not a request for a period of absence, and it
+// creates no work. It also never creates, changes or removes a BookingAssignment —
+// BookingAssignment remains the only source of truth for real work, and nothing in
+// the resignation path writes to it.
+//
+// The SAME three states as leave, deliberately: a request is only ever "requested"
+// on creation, only an admin approve/decline moves it to a decision, and a decided
+// request is never re-decided. Declared here so the vocabulary is validated in one
+// place rather than as free text in a TEXT column.
+//
+// The status is NOT written by the submission handler: EmployeeResignationRequest
+// is created without a `status`, so the schema default applies. A request
+// therefore cannot be filed as "approved" or "declined" by any caller, which is
+// what makes "the only way in is requested" a property of the write rather than a
+// convention every future caller has to remember.
+export const RESIGNATION_REQUEST_STATUS = ["requested", "approved", "declined"];
+export const RESIGNATION_REQUEST_STATUS_DEFAULT = "requested";
+
 export const REVIEW_STATUS = ["pending", "approved", "rejected"];
 
 // COMMUNITY AUDIENCE — Phase 2B-5. The community chat wall is served to TWO

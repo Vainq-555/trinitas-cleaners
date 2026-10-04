@@ -91,6 +91,18 @@ model User {
   leaveRequests    EmployeeLeaveRequest[] @relation("LeaveRequestEmployee")
   leaveDecisions   EmployeeLeaveRequest[] @relation("LeaveRequestDecider")
 
+  // Employee RESIGNATION back-relations (additive). Named relations, because
+  // EmployeeResignationRequest references User three times over: the employee who
+  // resigned, the admin who decided the request, and the admin who acknowledged
+  // any outstanding assignments. These are Prisma-level declarations only — they
+  // are satisfied entirely by the new table's own foreign keys and generate NO
+  // statement against "User" in the migration, so no existing table is altered and
+  // NO scalar column is added to User. The resignation record itself is the audit
+  // trail; there is deliberately no resignedAt/resignedById on User.
+  resignationRequestsAsEmployee           EmployeeResignationRequest[] @relation("ResignationRequestEmployee")
+  resignationRequestsAsDecider            EmployeeResignationRequest[] @relation("ResignationRequestDecider")
+  resignationRequestsAsOrphanAcknowledger EmployeeResignationRequest[] @relation("ResignationRequestOrphanAcknowledger")
+
   @@index([role])
 }
 
@@ -868,6 +880,90 @@ model EmployeeLeaveRequest {
   // admin must never erase the decision or its timestamp.
   decidedBy  User?    @relation("LeaveRequestDecider", fields: [decidedById], references: [id], onDelete: SetNull)
   // The employee's own portal list (server-scoped read on every load).
+  @@index([employeeId, status])
+  // The admin's pending-first queue.
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Employee resignation.
+//
+// A resignation is the employee asking to END the employment relationship. What
+// actually changes the account is NOT this row: approving a request transitions
+// User.role "employee" -> "customer", so the former employee stays as a normal
+// customer and can keep booking. It deliberately does NOT set User.disabledAt:
+// disabling is a separate, admin-controlled access lifecycle, and reusing it
+// here would wrongly deny a person who is now an ordinary customer.
+//
+// NO resignedAt / resignedById columns exist on User. This row IS the permanent
+// audit record, which is strictly better than a User column: it is queryable,
+// it survives the role change, and it can hold the whole decision (who decided,
+// when, and why any outstanding work was abandoned).
+//
+// This model deliberately stores only the COUNT of orphaned assignments plus the
+// acknowledgement audit trail — never a relation to Booking or BookingAssignment.
+// BookingAssignment remains the sole source of truth for real work.
+// ---------------------------------------------------------------------------
+model EmployeeResignationRequest {
+  id         String   @id @default(cuid())
+  employeeId String
+  // Optional. NULL is a valid request ("I am resigning"); absence of a note is
+  // never a reason to refuse one.
+  note       String?
+  // "requested" | "approved" | "declined" — exactly three states, mirroring
+  // EmployeeLeaveRequest. A request is only ever "requested" on creation; only an
+  // admin approve/decline moves it, and a decided request is never re-decided.
+  // Approving WITH an orphan acknowledgement is still status "approved": the
+  // acknowledgement is expressed by the orphan* columns, never by a fourth status.
+  status     String   @default("requested")
+  decidedAt  DateTime?
+  decidedById String?
+  // The number of accepted, non-archived BookingAssignments that still had no
+  // replacement when the admin approved. NULL means no override was used at all,
+  // which is distinguishable from an override recorded as 0.
+  orphanedAssignmentCount Int?
+  // WHY the outstanding work was abandoned. Required whenever an override is
+  // used (enforced in the API); NULL whenever approval had nothing to override.
+  orphanReason String?
+  // WHO acknowledged the orphaned assignments and WHEN. Without these the
+  // override would record a reason with no actor and no timestamp, which is not
+  // an audit trail. All three stay NULL on an ordinary approval.
+  orphanAcknowledgedAt   DateTime?
+  orphanAcknowledgedById String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // employeeId CASCADE, matching EmployeeLeaveRequest.employeeId and
+  // ShiftRequest.employeeId: a request is meaningless without its employee. This
+  // destroys no history, because an employee User row is NEVER deleted — admins
+  // disable/reactivate rather than remove, and DELETE /auth/account refuses
+  // employee accounts — so assignment history can never cascade away.
+  employee User @relation("ResignationRequestEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  // decidedById SET NULL, matching EmployeeLeaveRequest.decidedById: removing the
+  // deciding admin must never erase the decision or its timestamp.
+  decidedBy User? @relation("ResignationRequestDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  // orphanAcknowledgedById SET NULL for the same reason: an override is an
+  // irreversible administrative act, so losing the actor must never delete the
+  // record that it happened.
+  orphanAcknowledgedBy User? @relation("ResignationRequestOrphanAcknowledger", fields: [orphanAcknowledgedById], references: [id], onDelete: SetNull)
+
+  // DELIBERATELY NO @@unique([employeeId, status]).
+  //
+  // That constraint would be wrong: it allows only ONE row per status value per
+  // employee, so an employee who resigned once (approved) could never resign
+  // again — a second "approved" row would collide. Historical approved and
+  // declined requests must coexist freely.
+  //
+  // The real rule is "at most ONE OPEN request per employee", and that is enforced
+  // by a PostgreSQL PARTIAL UNIQUE INDEX created in the migration:
+  //     CREATE UNIQUE INDEX "EmployeeResignationRequest_employeeId_requested_key"
+  //       ON "EmployeeResignationRequest"("employeeId") WHERE "status" = 'requested';
+  // Prisma 5.22 cannot model a partial index, so the predicate deliberately lives
+  // only in migration SQL. This mirrors the existing ContentSection global-content
+  // partial index (20260914000000_add_service_content). The migration SQL is
+  // authoritative for this constraint.
+  //
+  // The employee's own list (server-scoped read on every load).
   @@index([employeeId, status])
   // The admin's pending-first queue.
   @@index([status])

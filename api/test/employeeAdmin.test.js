@@ -21,6 +21,8 @@ import {
   INVITATION_TOKEN_TTL_MS,
 } from "../src/utils/employeeInvitation.js";
 import { activateEmployeeAccount } from "../src/controllers/auth.js";
+import { authenticate } from "../src/middleware/auth.js";
+import { signToken } from "../src/utils/jwt.js";
 
 const t = (s) => new Date(s);
 const HOUR = 60 * 60 * 1000;
@@ -414,7 +416,13 @@ test("disable: is idempotent and refuses a non-employee target", async () => {
     const res = response();
     let updated2 = false;
     await withDb(
-      { user: { findUnique: async () => ({ id: "x", role, disabledAt: null }), update: async () => { updated2 = true; } } },
+      {
+        user: { findUnique: async () => ({ id: "x", role, disabledAt: null }), update: async () => { updated2 = true; } },
+        // These targets are NOT former employees: they have no approved
+        // resignation, which is exactly what an ordinary customer/admin is. The
+        // assertions below are unchanged — they must still be refused.
+        employeeResignationRequest: { findFirst: async () => null },
+      },
       () => adminDisableEmployee({ user: ADMIN, params: { id: "x" } }, res),
     );
     assert.equal(res.statusCode, 400);
@@ -430,6 +438,225 @@ test("disable: a missing target is a 404", async () => {
     () => adminDisableEmployee({ user: ADMIN, params: { id: "nope" } }, res),
   );
   assert.equal(res.statusCode, 404);
+});
+
+// =============== 14(b): an admin can still disable a FORMER employee ===============
+//
+// Approving a resignation flips role "employee" -> "customer". `role` is identity
+// and `disabledAt` is the account lifecycle: they are separate concepts, and
+// conflating them is the bug. Because `adminDisableEmployee` is the ONLY writer
+// of `disabledAt` in the codebase, a hard `role === employee` target check meant
+// an admin silently lost the ability to disable a former employee's account.
+//
+// The former-employee test is the approved resignation request — no new User
+// column, no resignedAt/resignedById, no role change.
+
+// Post-approval state: role is already "customer", history is intact.
+const formerEmployeeRow = (overrides = {}) => employeeRow({ role: ROLES.CUSTOMER, ...overrides });
+
+// A query-aware stub, so a test cannot accidentally pass by ignoring the status
+// filter the handler relies on.
+function resignationTable(rows = []) {
+  return {
+    findFirst: async ({ where }) =>
+      rows.find((r) => r.employeeId === where.employeeId && r.status === where.status) ?? null,
+  };
+}
+
+test("disable: an admin CAN disable a former employee whose resignation was APPROVED", async () => {
+  let updateArgs = null;
+  let deleted = false;
+  const res = response();
+  await withDb(
+    {
+      user: {
+        findUnique: async () => formerEmployeeRow(),
+        update: async (args) => {
+          updateArgs = args;
+          return formerEmployeeRow({ disabledAt: args.data.disabledAt });
+        },
+        delete: async () => { deleted = true; },
+      },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
+      employeeResignationRequest: resignationTable([
+        { id: "rs1", employeeId: "emp1", status: "approved" },
+      ]),
+    },
+    () => adminDisableEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
+  );
+  assert.equal(res.statusCode, 200);
+  // 4. disabledAt is set, through the EXISTING mechanism.
+  assert.ok(updateArgs.data.disabledAt instanceof Date, "disabledAt is set");
+  assert.equal(updateArgs.where.id, "emp1");
+  assert.equal(updateArgs.data.status, "offline", "presence is kept truthful");
+  assert.equal(deleted, false, "the User is never deleted");
+  // 3. and the person stays a customer: the write touches no role field at all.
+  assert.equal("role" in updateArgs.data, false, "disabling never rewrites role");
+  assert.equal(res.body.employee.role, ROLES.CUSTOMER, "a former employee remains a customer");
+  assert.ok(res.body.employee.disabledAt, "the response reports the disabled account");
+});
+
+test("disable: a CURRENT employee is disabled with NO resignation lookup at all", async () => {
+  let updateArgs = null;
+  let resignationQueried = false;
+  const res = response();
+  await withDb(
+    {
+      user: {
+        findUnique: async () => employeeRow(),
+        update: async (args) => { updateArgs = args; return employeeRow({ disabledAt: args.data.disabledAt }); },
+      },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
+      employeeResignationRequest: {
+        findFirst: async () => { resignationQueried = true; return null; },
+      },
+    },
+    () => adminDisableEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
+  );
+  assert.equal(res.statusCode, 200);
+  assert.ok(updateArgs.data.disabledAt instanceof Date);
+  // The role check short-circuits, so the existing employee path costs nothing
+  // extra and cannot be broken by resignation history.
+  assert.equal(resignationQueried, false, "a current employee must not trigger a history lookup");
+});
+
+for (const status of ["requested", "declined"]) {
+  test(`disable: a ${status} resignation does NOT make someone a former employee`, async () => {
+    let updated = false;
+    const res = response();
+    await withDb(
+      {
+        user: {
+          findUnique: async () => formerEmployeeRow(),
+          update: async () => { updated = true; return formerEmployeeRow(); },
+        },
+        employeeResignationRequest: resignationTable([
+          { id: "rs1", employeeId: "emp1", status },
+        ]),
+      },
+      () => adminDisableEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
+    );
+    // Employment has not ended (pending) or never ended (declined), so the
+    // existing refusal is preserved verbatim.
+    assert.equal(res.statusCode, 400);
+    assert.match(res.body.error, /not an employee/);
+    assert.equal(updated, false, "only an APPROVED resignation admits the disable");
+  });
+}
+
+test("disable: the former-employee check is an index-only lookup on the target id", async () => {
+  let args = null;
+  const res = response();
+  await withDb(
+    {
+      user: {
+        findUnique: async () => formerEmployeeRow(),
+        update: async (a) => formerEmployeeRow({ disabledAt: a.data.disabledAt }),
+      },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
+      employeeResignationRequest: {
+        findFirst: async (a) => { args = a; return { id: "rs1" }; },
+      },
+    },
+    () => adminDisableEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
+  );
+  assert.deepEqual(args.where, { employeeId: "emp1", status: "approved" });
+  assert.deepEqual(args.select, { id: true }, "existence only — never a history read");
+  assert.equal("orderBy" in args, false, "which approved row is newest is irrelevant");
+  assert.equal(res.statusCode, 200);
+});
+
+test("disable: a hostile body cannot choose a different user's id", async () => {
+  const lookups = [];
+  const res = response();
+  await withDb(
+    {
+      user: {
+        findUnique: async (args) => { lookups.push(args.where.id); return formerEmployeeRow(); },
+        update: async (args) => formerEmployeeRow({ disabledAt: args.data.disabledAt }),
+      },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
+      employeeResignationRequest: resignationTable([
+        { id: "rs1", employeeId: "cus9", status: "approved" },
+      ]),
+    },
+    // The target comes from the path param only; the body id is ignored entirely.
+    () => adminDisableEmployee({ user: ADMIN, params: { id: "emp1" }, body: { id: "cus9" } }, res),
+  );
+  assert.deepEqual(lookups, ["emp1"], "only the path param is ever read");
+  // "cus9" HAS an approved resignation, yet "emp1" has none, so emp1 stays refused.
+  assert.equal(res.statusCode, 400, "one user's approved history cannot disable another account");
+  assert.match(res.body.error, /not an employee/);
+});
+
+test("disable: disabling a former employee never touches resignation history", async () => {
+  const tripwire = (name) => async () => { throw new Error(`resignation history must not be ${name}`); };
+  const res = response();
+  await withDb(
+    {
+      user: {
+        findUnique: async () => formerEmployeeRow(),
+        update: async (args) => formerEmployeeRow({ disabledAt: args.data.disabledAt }),
+      },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
+      employeeResignationRequest: {
+        findFirst: resignationTable([{ id: "rs1", employeeId: "emp1", status: "approved" }]).findFirst,
+        update: tripwire("updated"),
+        updateMany: tripwire("updated"),
+        create: tripwire("created"),
+        upsert: tripwire("written"),
+        delete: tripwire("deleted"),
+        deleteMany: tripwire("deleted"),
+      },
+    },
+    () => adminDisableEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
+  );
+  assert.equal(res.statusCode, 200, "only the read path was used");
+});
+
+test("disable: a disabled FORMER employee is rejected by authentication", async () => {
+  // End-to-end consequence of the widened disable: `disabledAt` is the same
+  // mechanism `authenticate` already enforces, so no new refusal path is needed.
+  const disabled = formerEmployeeRow({ disabledAt: t("2026-10-01T00:00:00Z"), role: ROLES.CUSTOMER });
+  let presenceUpdated = false;
+  const req = { cookies: { tc_token: signToken(disabled) }, headers: {} };
+  const res = response();
+  let reached = false;
+  await withDb(
+    {
+      user: {
+        findUnique: async () => disabled,
+        update: async () => { presenceUpdated = true; return disabled; },
+      },
+    },
+    () => authenticate(req, res, () => { reached = true; }),
+  );
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.body.error, "Account is disabled");
+  assert.equal(reached, false, "a session minted before the disable must not reach a handler");
+  assert.equal(presenceUpdated, false, "no presence write for a disabled account");
+});
+
+test("disable: a reactivated FORMER employee is accepted again (the trapdoor is closed)", async () => {
+  // Closes the one-way door that 14(b) would otherwise have opened: disable now
+  // admits a former employee, so reactivation must be able to undo it.
+  let updateArgs = null;
+  const res = response();
+  await withDb(
+    {
+      user: {
+        findUnique: async () => formerEmployeeRow({ disabledAt: t("2026-10-01T00:00:00Z") }),
+        update: async (args) => { updateArgs = args; return formerEmployeeRow(); },
+      },
+      employeeResignationRequest: resignationTable([
+        { id: "rs1", employeeId: "emp1", status: "approved" },
+      ]),
+    },
+    () => adminReactivateEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
+  );
+  assert.equal(res.statusCode, 200, "an admin can re-enable an account they disabled");
+  assert.deepEqual(updateArgs.data, { disabledAt: null });
+  assert.equal(res.body.employee.role, ROLES.CUSTOMER, "still a customer — no employment restored");
 });
 
 test("reactivate: only an admin may reactivate, and it clears disabledAt without deleting", async () => {
@@ -474,10 +701,209 @@ test("reactivate: is idempotent and refuses a non-employee target", async () => 
 
   const res = response();
   await withDb(
-    { user: { findUnique: async () => ({ id: "x", role: ROLES.CUSTOMER, disabledAt: t("2026-09-01T00:00:00Z") }) } },
+    {
+      user: { findUnique: async () => ({ id: "x", role: ROLES.CUSTOMER, disabledAt: t("2026-09-01T00:00:00Z") }) },
+      // Never an employee: no approved resignation, which is exactly what an
+      // ordinary customer is. The assertions below are unchanged — still refused.
+      employeeResignationRequest: resignationTable([]),
+    },
     () => adminReactivateEmployee({ user: ADMIN, params: { id: "x" } }, res),
   );
   assert.equal(res.statusCode, 400);
+});
+
+// ============ reactivation of a FORMER employee (closes the 14(b) trapdoor) ============
+//
+// `adminDisableEmployee` admits a former employee, so this endpoint must be able
+// to undo that. Eligibility is the SAME rule as disable: an APPROVED resignation
+// request, never role alone — role is "customer" for a former employee AND for
+// someone who was never one, so it cannot answer the question on its own.
+//
+// Reactivation is not reinstatement. The write stays exactly `{ disabledAt: null }`,
+// so no role is restored and no employee permission comes back.
+
+test("reactivate: an admin CAN reactivate a former employee whose resignation was APPROVED", async () => {
+  let updateArgs = null;
+  let deleted = false;
+  const res = response();
+  await withDb(
+    {
+      user: {
+        findUnique: async () => formerEmployeeRow({ disabledAt: t("2026-10-01T00:00:00Z") }),
+        update: async (args) => { updateArgs = args; return formerEmployeeRow(); },
+        delete: async () => { deleted = true; },
+      },
+      employeeResignationRequest: resignationTable([
+        { id: "rs1", employeeId: "emp1", status: "approved" },
+      ]),
+    },
+    () => adminReactivateEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
+  );
+  assert.equal(res.statusCode, 200);
+  // disabledAt cleared through the existing mechanism, and NOTHING else written.
+  assert.deepEqual(updateArgs.data, { disabledAt: null });
+  assert.equal(updateArgs.where.id, "emp1");
+  assert.equal(deleted, false, "reactivating never deletes the user");
+  assert.equal(res.body.employee.disabledAt, null, "disabledAt is cleared");
+  assert.equal(res.body.employee.id, "emp1", "the SAME account resumes");
+});
+
+test("reactivate: a reactivated former employee is still a CUSTOMER with no privileges restored", async () => {
+  let updateArgs = null;
+  const res = response();
+  await withDb(
+    {
+      user: {
+        findUnique: async () => formerEmployeeRow({ disabledAt: t("2026-10-01T00:00:00Z") }),
+        update: async (args) => { updateArgs = args; return formerEmployeeRow(); },
+      },
+      employeeResignationRequest: resignationTable([
+        { id: "rs1", employeeId: "emp1", status: "approved" },
+      ]),
+    },
+    () => adminReactivateEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
+  );
+  // The single strongest proof that employment is not reinstated: the update
+  // payload contains disabledAt and NOT ONE other field.
+  assert.deepEqual(Object.keys(updateArgs.data), ["disabledAt"]);
+  assert.equal("role" in updateArgs.data, false, "role is never rewritten");
+  assert.equal("status" in updateArgs.data, false, "no invented lifecycle status");
+  assert.equal(res.body.employee.role, ROLES.CUSTOMER, "and the view confirms it");
+});
+
+test("reactivate: a CURRENT employee is reactivated with NO resignation lookup", async () => {
+  let updateArgs = null;
+  let resignationQueried = false;
+  const res = response();
+  await withDb(
+    {
+      user: {
+        findUnique: async () => employeeRow({ disabledAt: t("2026-09-01T00:00:00Z") }),
+        update: async (args) => { updateArgs = args; return employeeRow(); },
+      },
+      employeeResignationRequest: { findFirst: async () => { resignationQueried = true; return null; } },
+    },
+    () => adminReactivateEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
+  );
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(updateArgs.data, { disabledAt: null });
+  assert.equal(resignationQueried, false, "the role check short-circuits for a current employee");
+});
+
+for (const status of ["requested", "declined"]) {
+  test(`reactivate: a ${status} resignation does NOT qualify as former-employee history`, async () => {
+    let updated = false;
+    const res = response();
+    await withDb(
+      {
+        user: {
+          findUnique: async () => formerEmployeeRow({ disabledAt: t("2026-10-01T00:00:00Z") }),
+          update: async () => { updated = true; return formerEmployeeRow(); },
+        },
+        employeeResignationRequest: resignationTable([
+          { id: "rs1", employeeId: "emp1", status },
+        ]),
+      },
+      () => adminReactivateEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
+    );
+    assert.equal(res.statusCode, 400, "only an APPROVED resignation qualifies");
+    assert.match(res.body.error, /not an employee/);
+    assert.equal(updated, false, "disabledAt is never cleared for a non-qualifying target");
+  });
+}
+
+test("reactivate: role CUSTOMER alone never confers former-employee status", async () => {
+  // The exact trap this guard exists to avoid: inferring history from the role.
+  const res = response();
+  let updated = false;
+  let queriedWith = null;
+  await withDb(
+    {
+      user: {
+        findUnique: async () => ({ id: "cus9", role: ROLES.CUSTOMER, disabledAt: t("2026-10-01T00:00:00Z") }),
+        update: async () => { updated = true; return { id: "cus9", role: ROLES.CUSTOMER }; },
+      },
+      employeeResignationRequest: { findFirst: async (args) => { queriedWith = args; return null; } },
+    },
+    () => adminReactivateEmployee({ user: ADMIN, params: { id: "cus9" } }, res),
+  );
+  assert.equal(res.statusCode, 400, "a customer who was never an employee stays refused");
+  assert.equal(updated, false);
+  // Eligibility came from the approved-request lookup, keyed on the path param.
+  assert.deepEqual(queriedWith.where, { employeeId: "cus9", status: "approved" });
+  assert.deepEqual(queriedWith.select, { id: true }, "existence only — never a history read");
+  assert.equal("orderBy" in queriedWith, false, "which approved row is newest is irrelevant");
+});
+
+test("reactivate: a hostile body cannot change the target or the role", async () => {
+  let where = null;
+  let updateArgs = null;
+  const res = response();
+  await withDb(
+    {
+      user: {
+        findUnique: async (args) => { where = args.where.id; return formerEmployeeRow({ disabledAt: t("2026-10-01T00:00:00Z") }); },
+        update: async (args) => { updateArgs = args; return formerEmployeeRow(); },
+      },
+      employeeResignationRequest: resignationTable([
+        { id: "rs1", employeeId: "emp1", status: "approved" },
+      ]),
+    },
+    () => adminReactivateEmployee(
+      { user: ADMIN, params: { id: "emp1" }, body: { id: "cus9", userId: "cus9", role: ROLES.EMPLOYEE } },
+      res,
+    ),
+  );
+  assert.equal(where, "emp1", "only the route param is ever read");
+  assert.deepEqual(updateArgs.where, { id: "emp1" }, "the write targets the path param");
+  assert.equal("role" in updateArgs.data, false, "a body role can never be applied");
+  assert.equal(res.body.employee.role, ROLES.CUSTOMER, "no privilege escalation via the body");
+});
+
+test("reactivate: reactivating a former employee writes no resignation row", async () => {
+  const tripwire = (name) => async () => { throw new Error(`resignation history must not be ${name}`); };
+  const res = response();
+  await withDb(
+    {
+      user: {
+        findUnique: async () => formerEmployeeRow({ disabledAt: t("2026-10-01T00:00:00Z") }),
+        update: async () => formerEmployeeRow(),
+      },
+      employeeResignationRequest: {
+        findFirst: resignationTable([{ id: "rs1", employeeId: "emp1", status: "approved" }]).findFirst,
+        update: tripwire("updated"),
+        updateMany: tripwire("updated"),
+        create: tripwire("created"),
+        upsert: tripwire("written"),
+        delete: tripwire("deleted"),
+        deleteMany: tripwire("deleted"),
+      },
+    },
+    () => adminReactivateEmployee({ user: ADMIN, params: { id: "emp1" } }, res),
+  );
+  assert.equal(res.statusCode, 200, "only the read path was used — history is untouched");
+});
+
+test("reactivate: a non-admin still cannot reactivate a former employee", async () => {
+  // The widening is scoped to the TARGET, never the CALLER.
+  for (const caller of [EMPLOYEE, { id: "cus1", role: ROLES.CUSTOMER }]) {
+    const res = response();
+    let updated = false;
+    let resignationQueried = false;
+    await withDb(
+      {
+        user: {
+          findUnique: async () => formerEmployeeRow({ disabledAt: t("2026-10-01T00:00:00Z") }),
+          update: async () => { updated = true; return formerEmployeeRow(); },
+        },
+        employeeResignationRequest: { findFirst: async () => { resignationQueried = true; return { id: "rs1" }; } },
+      },
+      () => adminReactivateEmployee({ user: caller, params: { id: "emp1" } }, res),
+    );
+    assert.equal(res.statusCode, 403, "admin authorization is unchanged");
+    assert.equal(updated, false);
+    assert.equal(resignationQueried, false, "a non-admin is refused before any lookup");
+  }
 });
 
 // =================== invitation token security ===================

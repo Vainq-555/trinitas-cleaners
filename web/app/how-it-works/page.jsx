@@ -25,12 +25,13 @@ export default function HowItWorksPage() {
       <main className="mx-auto max-w-7xl w-full px-4 sm:px-6 py-12 flex-1">
         <div className="max-w-2xl">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-light px-3 py-1 text-xs font-bold uppercase tracking-wide text-brand">
-            <Sparkles size={13} /> Getting Started
+            <Sparkles size={13} /> A Simple Way to Get Started
           </span>
           <h1 className="mt-4 page-title">How It Works</h1>
           <p className="mt-3 text-muted">
-            Simple, transparent booking. Here&apos;s how a Trinitas-Cleaners request
-            moves from account creation to a finished, receipted job.
+            Booking with Trinitas is simple. Create your account, tell us what
+            you need, and we&apos;ll guide you through the rest. Pricing is based on
+            the details of your service and applicable taxes.
           </p>
         </div>
 

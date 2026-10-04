@@ -10,18 +10,18 @@ import { api } from "@/lib/api";
 const FALLBACK_STEPS = [
   {
     sectionKey: "create-account",
-    title: "Create an account",
-    body: "Create a free account using your name, email, and password. Your account lets you request services, track bookings, and receive updates.",
+    title: "Welcome! Let's get you started.",
+    body: "Hey there! Welcome to Trinitas. Create your free account and you'll be ready to request a service, keep up with your bookings, view your receipts, and stay connected with us along the way.",
   },
   {
     sectionKey: "request-service",
-    title: "Request a service",
-    body: "Choose a service and a date, then submit your request. A Trinitas-Cleaners representative reviews every request before confirming it.",
+    title: "Tell us what you need.",
+    body: "Have something you'd like us to take care of? Once you're logged in, reach out and tell the Trinitas admin what you need. You can describe the work, ask questions, and we'll talk through the service and pricing, including any applicable taxes, so we can make sure everything is clear before moving forward.",
   },
   {
     sectionKey: "approval",
-    title: "Get approved",
-    body: "Accepted requests move forward. If a request cannot be accepted, it is declined and you can reach out through your dashboard for help.",
+    title: "Hey, have you booked it?",
+    body: "Once you've shared what you need, we'll review your booking and make sure all the details look right. If everything is good to go, the Trinitas admin will approve your booking and you'll be ready to move on to payment.",
   },
   {
     sectionKey: "payment",

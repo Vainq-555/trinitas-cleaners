@@ -136,18 +136,49 @@ export async function adminCreateEmployee(req, res, _next, deps = defaultDeps) {
   res.status(201).json({ employee: adminEmployeeView(user), invitationExpiresAt: result.expiresAt });
 }
 
+// Is this account a FORMER employee, i.e. does it carry approved employment
+// history? The approved resignation request is the source of truth, because
+// approving one deliberately flips role "employee" -> "customer", so `role` can
+// no longer distinguish "never an employee" from "employment has ended". Reading
+// history here is what keeps an ordinary customer out of the employee
+// endpoints: a customer with no approved request is still refused exactly as
+// before, so this widens nothing for them.
+//
+// Existence only. `@@index([employeeId, status])` makes this an index-only
+// lookup on a single-column projection, not a history read, and no `orderBy` is
+// needed because the question is whether ANY approved request exists. "requested"
+// and "declined" are NOT former-employee status: employment has not ended yet, or
+// never ended. Read-only — this never writes or alters resignation history.
+async function hasApprovedResignation(userId) {
+  const approved = await prisma.employeeResignationRequest.findFirst({
+    where: { employeeId: userId, status: "approved" },
+    select: { id: true },
+  });
+  return Boolean(approved);
+}
+
 // POST /api/admin/employees/:id/disable
 //
 // Sets User.disabledAt. NEVER deletes the user, and never cascades: identity,
 // booking assignments and all history remain intact. Because `authenticate`
 // re-reads the user and rejects a disabled account, every existing session for
 // that employee stops being authorized on its next request.
+//
+// `role` and `disabledAt` stay strictly separate concepts here. `role` is
+// authorization/identity; `disabledAt` is the account lifecycle. The target check
+// therefore admits exactly two things: a current employee, or a former employee
+// proven by an approved resignation. A former employee's role is left as
+// "customer" and is never flipped back — disabling says nothing about identity,
+// it only marks the account administratively unusable.
 export async function adminDisableEmployee(req, res) {
   if (!requireAdminActor(req, res)) return;
   const { id } = req.params;
   const employee = await prisma.user.findUnique({ where: { id }, select: employeeSelect });
   if (!employee) return res.status(404).json({ error: "Employee not found" });
-  if (employee.role !== ROLES.EMPLOYEE) {
+  // `&&` short-circuits, so a CURRENT employee is accepted by the role check and
+  // no resignation lookup is issued at all: the existing employee path is
+  // untouched and costs no extra query.
+  if (employee.role !== ROLES.EMPLOYEE && !(await hasApprovedResignation(id))) {
     return badRequest(res, "Target user is not an employee");
   }
   if (employee.disabledAt) {
@@ -182,12 +213,27 @@ export async function adminDisableEmployee(req, res) {
 //
 // Clears User.disabledAt. Never deletes the user, never re-creates it, and never
 // touches assignments or history — the SAME account and employee identity resume.
+//
+// The target check mirrors `adminDisableEmployee` exactly, and for the same
+// reason: since 14(b) an admin can disable a former employee's account, so this
+// endpoint must also be able to undo that. Otherwise disable would be a one-way
+// door with no administrative remedy. Only an APPROVED resignation establishes
+// former-employee history — never role alone, since role is "customer" for both a
+// former employee and someone who was never one.
+//
+// Reactivation does NOT restore employment. The write below is unchanged and
+// touches `disabledAt` and nothing else, so a former employee comes back as a
+// customer: no role flip, no reinstated employee permissions, no new status
+// value, and no resignation row is created, altered or removed. Presence is left
+// exactly as it is for employees too — reactivation invents no lifecycle state,
+// and the account goes "online" the ordinary way, when the person next signs in.
 export async function adminReactivateEmployee(req, res) {
   if (!requireAdminActor(req, res)) return;
   const { id } = req.params;
   const employee = await prisma.user.findUnique({ where: { id }, select: employeeSelect });
   if (!employee) return res.status(404).json({ error: "Employee not found" });
-  if (employee.role !== ROLES.EMPLOYEE) {
+  // Short-circuits for a CURRENT employee: no resignation lookup, unchanged path.
+  if (employee.role !== ROLES.EMPLOYEE && !(await hasApprovedResignation(id))) {
     return badRequest(res, "Target user is not an employee");
   }
   if (!employee.disabledAt) {
