@@ -3,11 +3,17 @@
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, RefreshCw, BadgePercent, Wrench, BookOpen,
-  Store, UserRound, MessageCircle, UsersRound, ArrowLeft, Trash2, Crown, Inbox,
+  RefreshCw,
+  UserRound,
+  MessageCircle,
+  UsersRound,
+  ArrowLeft,
+  Trash2,
+  Crown,
+  Inbox,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api, fmtDate, fmtDateTime } from "@/lib/api";
 import {
   GROUPS_LIMIT_DEFAULT,
@@ -19,23 +25,6 @@ import {
   messageDisplayText,
 } from "@/lib/groups";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 const toQuery = (q) => {
   const p = new URLSearchParams();
@@ -208,7 +197,7 @@ export default function AdminGroupDetailPage({ params }) {
   const shown = chronologicalGroupMessages(messages);
 
   return (
-    <Shell links={links} sections={["Admin Portal"]}
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]}
       title={group ? group.name : "Group details"}
       subtitle="Inspect members and messages, and moderate this group.">
       <div className="mb-4">

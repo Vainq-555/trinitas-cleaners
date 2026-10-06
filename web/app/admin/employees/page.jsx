@@ -27,32 +27,20 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, Star, BadgeDollarSign, Wrench,
-  Store, BadgePercent, ReceiptText, MessageSquare, MessageCircle, UsersRound,
-  BookOpen, Plus, RefreshCw, Ban, UserCheck, Phone, Mail, ShieldAlert, Clock,
-  CalendarOff,
+  UsersRound,
+  Plus,
+  RefreshCw,
+  Ban,
+  UserCheck,
+  Phone,
+  Mail,
+  ShieldAlert,
+  Clock,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api, fmtDateTime } from "@/lib/api";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  // Employee leave requests are decided from the admin queue, next to the employees
-  // they belong to.
-  { href: "/admin/leave", label: "Leave", icon: CalendarOff },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: BookOpen },
-];
 
 const employeeState = (e) => {
   if (e.disabledAt) return "disabled";
@@ -180,7 +168,7 @@ export default function AdminEmployeesPage() {
   };
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title="Employees"
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Employees"
       subtitle="Invite, monitor, and manage employee accounts. Employees set their own passwords.">
       {notice ? (
         <p className={`mb-4 text-sm ${notice.tone === "ok" ? "text-muted" : "text-danger"}`} role="alert">

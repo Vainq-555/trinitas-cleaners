@@ -3,31 +3,21 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, Ban, UserCheck, MessageCircle, Inbox,
-  RefreshCw, BadgePercent, Wrench, BookOpen, Store, Eye, EyeOff, UserRound,
-  UsersRound,
+  MessageSquare,
+  Ban,
+  UserCheck,
+  MessageCircle,
+  Inbox,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  UserRound,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api, fmtDateTime } from "@/lib/api";
 import { feedQuery, chronological } from "@/lib/community";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 const toQuery = (q) => {
   const p = new URLSearchParams();
@@ -217,7 +207,7 @@ export default function AdminCommunityPage() {
   const shown = chronological(messages);
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title="Community"
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Community"
       subtitle="Monitor the shared customer community and block or unblock posting access.">
       {err && <div className="form-error mb-6">{err}</div>}
       {notice && <div className="form-ok mb-6">{notice}</div>}

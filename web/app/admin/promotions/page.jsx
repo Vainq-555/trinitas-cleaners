@@ -2,31 +2,17 @@
 
 import { useEffect, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, Save, Plus, TicketPercent, Power, Pencil, X, Wrench, BookOpen, Store,
-MessageCircle,
-  UsersRound,
+  Save,
+  Plus,
+  TicketPercent,
+  Power,
+  Pencil,
+  X,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api, fmtDate } from "@/lib/api";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: TicketPercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 const emptyForm = {
   code: "",
@@ -190,7 +176,7 @@ export default function PromotionsPage() {
       : "All services";
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title="Discounts & Promotions"
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Discounts & Promotions"
       subtitle="Create discount codes, set limits, and control availability.">
       {msg && <div className="form-ok">{msg}</div>}
       {err && <div className="form-error">{err}</div>}

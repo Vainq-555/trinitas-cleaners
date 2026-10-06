@@ -2,30 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, Send, MessageCircle, Inbox, BadgePercent, Wrench, BookOpen, Store,
-  UsersRound,
+  Send,
+  MessageCircle,
+  Inbox,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api, fmtDateTime } from "@/lib/api";
 import { counterpartBadge, counterpartSubtitle, isEmployeeThread } from "@/lib/threadCounterpart.mjs";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 export default function AdminMessagesPage() {
   const [threads, setThreads] = useState([]);
@@ -73,7 +58,7 @@ export default function AdminMessagesPage() {
   };
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title="Communication Hub"
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Communication Hub"
       subtitle="Reply directly to customers and employees about issues, pricing, and custom requests.">
       <div className="grid gap-6 lg:grid-cols-[320px_1fr] items-start">
         {/* Threads */}

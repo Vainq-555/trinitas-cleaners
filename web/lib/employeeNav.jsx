@@ -42,6 +42,7 @@ export function employeeNavLinks(unreadCount = 0) {
     { href: "/employee/availability", label: "My Availability", icon: CalendarClock },
     { href: "/employee/shifts", label: "Available Shifts", icon: CalendarDays },
     { href: "/employee/leave", label: "My Leave", icon: CalendarOff },
+    { href: "/employee/resignation", label: "Resignation", icon: CalendarOff },
     { href: "/employee/community", label: "Community", icon: MessagesSquare },
     { href: "/employee/broadcasts", label: announcementNavLabel(unreadCount), icon: Megaphone },
     { href: "/employee/messages", label: "Contact Admin", icon: MessageSquare },

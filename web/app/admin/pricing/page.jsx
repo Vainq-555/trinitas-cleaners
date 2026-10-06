@@ -3,32 +3,18 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, Save, UserRound, BadgePercent, CalendarClock, Globe, X, Wrench, BookOpen, Store,
-MessageCircle,
-  UsersRound,
+  Save,
+  UserRound,
+  BadgePercent,
+  CalendarClock,
+  Globe,
+  X,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api } from "@/lib/api";
 import { centsToDollars, customerMonthlyBody, customerMonthlyClearBody, globalMonthlyBody } from "@/lib/pricing";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 export default function PricingPage() {
   const searchParams = useSearchParams();
@@ -138,7 +124,7 @@ export default function PricingPage() {
     Boolean(s.monthlyActive) && Number.isInteger(s.monthlyPriceCents) && s.monthlyPriceCents >= 0;
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title="Pricing Control"
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Pricing Control"
       subtitle="Change prices globally for everyone, or individually for one customer.">
       {msg && <div className="form-ok">{msg}</div>}
 

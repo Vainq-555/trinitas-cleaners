@@ -2,14 +2,21 @@
 
 import { useEffect, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, Check, X, Hammer, Inbox, CheckCircle2, ThumbsDown, BadgePercent, Wrench, BookOpen,
-  Banknote, RotateCcw, Receipt, Store, Eye,
-MessageCircle,
+  Check,
+  X,
+  Hammer,
+  Inbox,
+  CheckCircle2,
+  ThumbsDown,
+  Banknote,
+  RotateCcw,
+  Receipt,
+  Eye,
   UsersRound,
   UserPlus,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import StatusBadge from "@/components/StatusBadge";
 import { api, fmtDate, money, moneyCents } from "@/lib/api";
 import { formatChicagoSchedule } from "@/lib/schedule";
@@ -23,24 +30,6 @@ import {
   subscriptionPeriodText,
 } from "@/lib/subscriptions";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/payments", label: "Payments", icon: Banknote },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 const SESSION_ICONS = {
   all: Inbox,
@@ -192,7 +181,7 @@ export default function AdminBookingsPage() {
   const counts = countBySession(bookings);
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title="Booking Management"
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Booking Management"
       subtitle="All bookings are grouped into tabs by status. Newly paid online bookings appear under Accepted & Worked.">
       <div className="flex flex-wrap gap-2 mb-6">
         {BOOKING_TABS.map((s) => {

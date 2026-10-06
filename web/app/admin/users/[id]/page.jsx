@@ -3,31 +3,16 @@
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, UserRound, ArrowLeft, BadgePercent, Wrench, BookOpen, Store,
-MessageCircle,
-  UsersRound,
+  ReceiptText,
+  UserRound,
+  ArrowLeft,
+  BadgePercent,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import StatusBadge from "@/components/StatusBadge";
 import { api, fmtDate, fmtDateTime, money } from "@/lib/api";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 export default function InspectUserPage({ params }) {
   const { id } = use(params);
@@ -39,7 +24,7 @@ export default function InspectUserPage({ params }) {
 
   if (!data) {
     return (
-      <Shell links={links} sections={["Admin Portal"]} title="Customer account">
+      <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Customer account">
         <div className="empty-state">Loading customer data…</div>
       </Shell>
     );
@@ -47,7 +32,7 @@ export default function InspectUserPage({ params }) {
 
   if (data.notFound) {
     return (
-      <Shell links={links} sections={["Admin Portal"]} title="Customer account">
+      <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Customer account">
         <div className="empty-state"><p className="font-semibold text-ink">Customer not found.</p></div>
       </Shell>
     );
@@ -56,7 +41,7 @@ export default function InspectUserPage({ params }) {
   const { user, serviceCatalog, bookings, receipts, messages } = data;
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title={`Account — ${user.name}`}
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title={`Account — ${user.name}`}
       subtitle="Impersonation view: everything this customer sees from their dashboard.">
       <Link href="/admin/users" className="btn btn-ghost btn-sm mb-4">
         <ArrowLeft size={15} /> Back to customers

@@ -17,31 +17,22 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, Ban, UserCheck, RefreshCw, BadgePercent,
-  Wrench, BookOpen, Store, MessagesSquare, Inbox, UsersRound,
+  Users,
+  Ban,
+  UserCheck,
+  RefreshCw,
+  MessagesSquare,
+  Inbox,
+  UsersRound,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api } from "@/lib/api";
 import { mergeNewest, removedCount } from "@/lib/employeeCommunity.mjs";
 
 const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/community", label: "Community", icon: MessagesSquare },
+  ...adminNavLinks(),
   { href: "/admin/community/employee", label: "Employee Community", icon: UsersRound },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
 ];
 
 const toQuery = (q) => {

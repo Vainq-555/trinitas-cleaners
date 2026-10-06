@@ -22,29 +22,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  BookOpen,
   CalendarOff,
   Check,
-  LayoutDashboard,
-  Megaphone,
-  MessageCircle,
-  MessageSquare,
-  ReceiptText,
   RotateCcw,
-  Send,
-  Star,
-  Store,
-  Users,
-  UsersRound,
-  Wrench,
   X,
-  CalendarCheck,
-  Banknote,
-  BadgeDollarSign,
-  BadgePercent,
   Info,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api } from "@/lib/api";
 import {
   isPendingLeave,
@@ -56,25 +41,6 @@ import {
   sortLeaveForAdmin,
 } from "@/lib/employeeLeave.mjs";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/payments", label: "Payments", icon: Banknote },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/shifts", label: "Shifts", icon: Send },
-  { href: "/admin/leave", label: "Leave", icon: CalendarOff },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 const FILTERS = [
   { value: "", label: "All requests" },
@@ -153,7 +119,7 @@ export default function AdminLeavePage() {
   const unauthorized = error?.status === 401 || error?.status === 403;
 
   return (
-    <Shell title="Leave Requests" links={links}>
+    <Shell title="Leave Requests" links={adminNavLinks()}>
       <section className="card card-pad">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

@@ -3,31 +3,18 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, BadgePercent, Wrench, BookOpen, Store, Plus, Save, Pencil, Power, X,
-MessageCircle,
-  UsersRound,
+  Wrench,
+  BookOpen,
+  Plus,
+  Save,
+  Pencil,
+  Power,
+  X,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api, fmtDate, moneyCents } from "@/lib/api";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 const emptyForm = { name: "", description: "", basePrice: "", isActive: true };
 
@@ -142,7 +129,7 @@ export default function ServicesPage() {
   };
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title="Services Manager"
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Services Manager"
       subtitle="Manage the catalog used by customers and the booking flow.">
       {msg && <div className="form-ok">{msg}</div>}
       {err && <div className="form-error">{err}</div>}

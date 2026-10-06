@@ -2,31 +2,16 @@
 
 import { useEffect, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, Send, Trash2, BellRing, Newspaper, BadgePercent, Wrench, BookOpen, Store,
-MessageCircle,
-  UsersRound,
+  Megaphone,
+  Send,
+  Trash2,
+  BellRing,
+  Newspaper,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api, fmtDateTime } from "@/lib/api";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 export default function BroadcastsPage() {
   const [broadcasts, setBroadcasts] = useState([]);
@@ -117,7 +102,7 @@ export default function BroadcastsPage() {
   const isEmployee = form.audience === "employee";
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title="Notifications & Announcements"
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Notifications & Announcements"
       subtitle="Publish to the public site, to all customers, to all employees, or to one specific account.">
       {/* Publish form */}
       <div className="card card-pad mb-6">

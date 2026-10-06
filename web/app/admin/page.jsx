@@ -3,33 +3,19 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, Clock3, Wifi, UserRound, Hammer, ArrowRight, BadgePercent, Wrench, BookOpen, Store,
-MessageCircle,
-  UsersRound,
+  CalendarCheck,
+  Clock3,
+  Wifi,
+  UserRound,
+  Hammer,
+  ArrowRight,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import StatCard from "@/components/StatCard";
 import StatusBadge from "@/components/StatusBadge";
 import { api, fmtDateTime, money } from "@/lib/api";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 export default function AdminHome() {
   const [stats, setStats] = useState(null);
@@ -51,7 +37,7 @@ export default function AdminHome() {
   const online = users.filter((u) => u.status === "online");
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title="Dashboard"
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Dashboard"
       subtitle="Live overview of customers, bookings, and revenue.">
       {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

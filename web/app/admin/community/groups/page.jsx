@@ -3,11 +3,14 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, RefreshCw, BadgePercent, Wrench, BookOpen,
-  Store, UserRound, MessageCircle, UsersRound, Inbox, ArrowRight,
+  RefreshCw,
+  UserRound,
+  UsersRound,
+  Inbox,
+  ArrowRight,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api, fmtDate } from "@/lib/api";
 import {
   GROUPS_LIMIT_DEFAULT,
@@ -17,23 +20,6 @@ import {
   adminGroupStatusLabel,
 } from "@/lib/groups";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 const toQuery = (q) => {
   const p = new URLSearchParams();
@@ -87,7 +73,7 @@ export default function AdminGroupsListPage() {
   };
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title="Community Groups"
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Community Groups"
       subtitle="Inspect and moderate every customer group — public, private, or by invitation only.">
       <p className="mb-4 max-w-2xl text-sm text-muted">
         Every customer-created group is listed here, including private and

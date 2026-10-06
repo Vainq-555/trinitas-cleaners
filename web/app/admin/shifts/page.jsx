@@ -18,21 +18,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  BookOpen,
-  LayoutDashboard,
-  Megaphone,
-  MessageCircle,
-  MessageSquare,
-  ReceiptText,
-  Store,
-  Users,
-  UsersRound,
-  Wrench,
-  CalendarCheck,
-  Star,
-  Banknote,
-  BadgeDollarSign,
-  BadgePercent,
   RefreshCw,
   Send,
   Check,
@@ -40,6 +25,7 @@ import {
   Plus,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api } from "@/lib/api";
 import { formatChicagoSchedule } from "@/lib/schedule.mjs";
 import { requestStatusClass, requestStatusLabel } from "@/lib/employeeShifts.mjs";
@@ -50,25 +36,6 @@ import {
   groupByDate,
 } from "@/lib/employeeAvailability.mjs";
 
-const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/payments", label: "Payments", icon: Banknote },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/shifts", label: "Shifts", icon: Send },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
-];
 
 function startTimeLabel(shift) {
   const when = formatChicagoSchedule(shift?.booking?.scheduledStartAt);
@@ -192,7 +159,7 @@ export default function AdminShiftsPage() {
   const availabilityGroups = groupByDate(availability);
 
   return (
-    <Shell links={links} sections={["Admin Portal"]} title="Shifts & Availability" subtitle="Publish unassigned work, and see who has asked for it.">
+    <Shell links={adminNavLinks()} sections={["Admin Portal"]} title="Shifts & Availability" subtitle="Publish unassigned work, and see who has asked for it.">
       {notice ? (
         <p className={`mb-4 text-sm ${notice.tone === "ok" ? "text-muted" : "text-danger"}`} role="alert">
           {notice.text}

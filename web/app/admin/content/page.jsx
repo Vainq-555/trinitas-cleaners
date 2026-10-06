@@ -2,12 +2,17 @@
 
 import { useEffect, useState } from "react";
 import {
-  LayoutDashboard, Users, CalendarCheck, BadgeDollarSign, ReceiptText,
-  MessageSquare, Megaphone, Star, BadgePercent, Wrench, BookOpen, Globe, Plus, Save, Pencil, Power, Trash2, X, Store, CircleHelp,
-MessageCircle,
-  UsersRound,
+  BookOpen,
+  Plus,
+  Save,
+  Pencil,
+  Power,
+  Trash2,
+  X,
+  CircleHelp,
 } from "lucide-react";
 import Shell from "@/components/Shell";
+import { adminNavLinks } from "@/lib/adminNav";
 import { api } from "@/lib/api";
 
 const DEFAULT_PAGE = "how-it-works";
@@ -23,21 +28,7 @@ const pageConfig = (page) =>
     : { typeName: "How It Works", titleField: "Title", bodyField: "Body", noun: "section" };
 
 const links = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/employees", label: "Employees", icon: UsersRound },
-  { href: "/admin/users", label: "Customers", icon: Users },
-  { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/pricing", label: "Pricing", icon: BadgeDollarSign },
-  { href: "/admin/services", label: "Services", icon: Wrench },
-  { href: "/admin/business", label: "Business Info", icon: Store },
-  { href: "/admin/promotions", label: "Discounts", icon: BadgePercent },
-  { href: "/admin/receipts", label: "Receipts", icon: ReceiptText },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/community", label: "Community", icon: MessageCircle },
-  { href: "/admin/community/groups", label: "Groups", icon: UsersRound },
-  { href: "/admin/broadcasts", label: "Broadcasts", icon: Megaphone },
-  { href: "/admin/content", label: "How It Works", icon: BookOpen },
+  ...adminNavLinks(),
   { href: "/admin/content?page=faq", label: "FAQ", icon: CircleHelp },
 ];
 
