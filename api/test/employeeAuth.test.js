@@ -13,7 +13,8 @@ import {
   requireCustomer,
   requireEmployee,
 } from "../src/middleware/auth.js";
-import { deleteAccount, login } from "../src/controllers/auth.js";
+import { deleteAccount, login, register } from "../src/controllers/auth.js";
+import { isEmail } from "../src/utils/validators.js";
 import prismaRouterSource from "../src/routes/index.js";
 
 const t = (s) => new Date(s);
@@ -517,15 +518,17 @@ test("deleteAccount: admins are still refused (preserved message)", async () => 
   assert.equal(deleted, false);
 });
 
-// ---- former-employee self-deletion is refused (approved resignation history) ----
+// ---- former-employee account closure (approved resignation history) ----
 //
 // An approved resignation moves User.role from "employee" to "customer", so the
 // role alone can no longer distinguish "never an employee" from "employment has
-// ended". These tests pin the guard that reads the resignation history instead, so
-// a former employee's User row — the anchor for their assignment history — can
-// never be cascaded away through this endpoint.
+// ended". A former employee is CLOSED IN PLACE instead of hard-deleted: the User
+// row remains (it anchors employment/audit history) but is anonymized and disabled
+// inside one transaction. Only an APPROVED resignation enters this branch, and the
+// account is always identified by req.user.id, never by a caller-supplied id.
 
 const APPROVED_RESIGNATION = { id: "rs1" };
+const ANON_EMAIL = "deleted+emp1@deleted.invalid";
 
 // An in-memory stand-in for the resignation table that HONOURS the where-clause the
 // guard actually issues, so a test can place rows and let the query decide the
@@ -537,23 +540,189 @@ function resignationTable(rows = []) {
   };
 }
 
-test("deleteAccount: a former employee whose resignation was APPROVED cannot delete the account", async () => {
+// Runs deleteAccount with the resignation lookup and the closure transaction
+// stubbed. `res` may be supplied by the caller (e.g. pre-seeded with a cookie).
+// Every transaction delegate call is recorded and `transactionUsed` reports whether
+// the closure transaction ran at all. Mirrors the interactive-transaction mocking
+// used in bookingSchedule.test.js / employeeResignationAdmin.test.js.
+async function runClosure(res, {
+  user = customer({ id: "emp1", passwordHash: "original-hash" }),
+  resignations = [{ id: "rs1", employeeId: "emp1", status: "approved" }],
+  txSpec,
+  failOn,
+} = {}) {
+  const calls = [];
+  const spec = txSpec ?? {
+    user: { update: async () => ({ id: "emp1" }) },
+    passwordResetToken: { deleteMany: async () => ({ count: 1 }) },
+    employeeInvitation: { deleteMany: async () => ({ count: 1 }) },
+    communityProfile: { updateMany: async () => ({ count: 1 }) },
+  };
+  const tx = {};
+  for (const [model, methods] of Object.entries(spec)) {
+    tx[model] = {};
+    for (const [method, impl] of Object.entries(methods)) {
+      tx[model][method] = async (args) => {
+        calls.push({ model, method, args });
+        if (failOn && failOn.model === model && failOn.method === method) {
+          throw new Error(`injected failure in ${model}.${method}`);
+        }
+        return impl(args);
+      };
+    }
+  }
+  const savedTx = prisma.$transaction;
+  let transactionUsed = false;
+  prisma.$transaction = async (fn) => { transactionUsed = true; return fn(tx); };
+  let error = null;
+  try {
+    await withDb(
+      {
+        employeeResignationRequest: {
+          findFirst: async (args) => resignationTable(resignations).findFirst(args),
+        },
+        user: { delete: async ({ where }) => ({ id: where.id }) },
+      },
+      () => deleteAccount({ user }, res),
+    );
+  } catch (e) {
+    error = e;
+  } finally {
+    prisma.$transaction = savedTx;
+  }
+  return { calls, error, transactionUsed };
+}
+
+const callFor = (calls, model, method) => calls.find((c) => c.model === model && c.method === method);
+
+test("deleteAccount: an APPROVED former employee is closed, not deleted, and gets success", async () => {
   const res = response();
-  let deleted = false;
-  await withDb(
-    {
-      user: { delete: async () => { deleted = true; } },
-      employeeResignationRequest: resignationTable([
-        { id: "rs1", employeeId: "emp1", status: "approved" },
-      ]),
-    },
-    // Role is already "customer": this is the post-approval state that used to
-    // reopen self-deletion.
-    () => deleteAccount({ user: customer({ id: "emp1" }) }, res),
+  const { calls, error, transactionUsed } = await runClosure(res);
+  assert.equal(error, null, "closure must not throw");
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { ok: true });
+  assert.equal(transactionUsed, true, "closure runs in one transaction");
+
+  const update = callFor(calls, "user", "update");
+  assert.ok(update, "the User row is UPDATED (retained), never hard-deleted");
+  assert.equal(update.args.where.id, "emp1", "the write is scoped to the authenticated user");
+});
+
+test("deleteAccount: closure anonymizes identity and revokes access", async () => {
+  const res = response();
+  const { calls } = await runClosure(res);
+  const { data } = callFor(calls, "user", "update").args;
+
+  assert.equal(data.email, ANON_EMAIL, "email is a deterministic, unique, anonymized value");
+  assert.equal(data.name, "Deleted User");
+  assert.equal(data.phone, null);
+  assert.equal(data.address, null);
+  assert.equal(data.stripeCustomerId, null);
+  assert.equal(data.status, "offline");
+  assert.ok(data.disabledAt instanceof Date, "disabledAt is set to now");
+
+  assert.notEqual(data.passwordHash, "original-hash", "the previous password hash is replaced");
+  assert.equal(typeof data.passwordHash, "string");
+  assert.ok(data.passwordHash.length > 20, "an unusable password hash is stored");
+  assert.equal("role" in data, false, "role is preserved, not rewritten");
+  assert.equal("createdAt" in data, false, "createdAt is preserved, not rewritten");
+});
+
+test("deleteAccount: closure removes outstanding credentials, preserving employment history", async () => {
+  const res = response();
+  const { calls } = await runClosure(res);
+
+  const reset = callFor(calls, "passwordResetToken", "deleteMany");
+  assert.ok(reset, "outstanding password-reset tokens are removed");
+  assert.equal(reset.args.where.userId, "emp1", "only the closed account's tokens are removed");
+  const invite = callFor(calls, "employeeInvitation", "deleteMany");
+  assert.ok(invite, "outstanding employee invitations are removed");
+  assert.equal(invite.args.where.userId, "emp1", "only the closed account's invitations are removed");
+
+  // Only the account row, the two credential tables and the social profile are
+  // written. No booking, assignment, leave, shift, availability, receipt, review,
+  // subscription or resignation table is touched, so all employment/audit history
+  // survives.
+  const written = [...new Set(calls.map((c) => c.model))].sort();
+  assert.deepEqual(written, ["communityProfile", "employeeInvitation", "passwordResetToken", "user"]);
+  for (const forbidden of [
+    "employeeResignationRequest",
+    "bookingAssignment",
+    "booking",
+    "payment",
+    "receipt",
+    "review",
+    "subscription",
+    "employeeLeaveRequest",
+    "shiftRequest",
+    "employeeAvailability",
+  ]) {
+    assert.equal(calls.some((c) => c.model === forbidden), false, `${forbidden} must not be touched`);
+  }
+});
+
+test("deleteAccount: closure anonymizes the CommunityProfile in the same transaction", async () => {
+  const res = response();
+  const { calls, error, transactionUsed } = await runClosure(res);
+  assert.equal(error, null);
+
+  const profile = callFor(calls, "communityProfile", "updateMany");
+  assert.ok(profile, "the CommunityProfile is anonymized, not hard-deleted");
+  assert.equal(profile.args.where.userId, "emp1", "only the authenticated user's profile is touched");
+  assert.deepEqual(profile.args.data, {
+    displayName: "Deleted User",
+    bio: null,
+    avatarUrl: null,
+    locationCity: null,
+    locationState: null,
+  });
+  assert.equal(transactionUsed, true, "the profile write is part of the closure transaction");
+  assert.equal(
+    calls.some((c) => c.model === "communityProfile" && c.method === "deleteMany"),
+    false,
+    "the CommunityProfile row is retained, never deleted",
   );
-  assert.equal(res.statusCode, 400);
-  assert.match(res.body.error, /administrator/i);
-  assert.equal(deleted, false, "a former employee's User row must be preserved");
+});
+
+test("deleteAccount: a former employee with NO CommunityProfile still closes successfully", async () => {
+  const res = response();
+  // updateMany matching zero rows is a successful no-op, so the closure must not
+  // throw and must still report success.
+  const { error, transactionUsed } = await runClosure(res, {
+    txSpec: {
+      user: { update: async () => ({ id: "emp1" }) },
+      passwordResetToken: { deleteMany: async () => ({ count: 0 }) },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
+      communityProfile: { updateMany: async () => ({ count: 0 }) },
+    },
+  });
+  assert.equal(error, null, "a missing CommunityProfile must not fail closure");
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { ok: true });
+  assert.equal(transactionUsed, true);
+});
+
+test("deleteAccount: another user's approved resignation never triggers closure", async () => {
+  const res = response();
+  // The table holds ONLY emp1's approved resignation; the caller is cus1.
+  const { calls, transactionUsed } = await runClosure(res, {
+    user: customer({ id: "cus1" }),
+    resignations: [{ id: "rs1", employeeId: "emp1", status: "approved" }],
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(transactionUsed, false, "no closure transaction runs for cus1");
+  assert.deepEqual(calls, [], "no closure writes are issued for another user's history");
+});
+
+test("deleteAccount: only an APPROVED resignation enters the closure branch", async () => {
+  for (const status of ["declined", "requested"]) {
+    const res = response();
+    const { transactionUsed } = await runClosure(res, {
+      resignations: [{ id: "rs2", employeeId: "emp1", status }],
+    });
+    assert.equal(res.statusCode, 200, `a ${status} resignation must not block deletion`);
+    assert.equal(transactionUsed, false, `a ${status} resignation must not close the account`);
+  }
 });
 
 test("deleteAccount: the former-employee guard is decided by an APPROVED request only", async () => {
@@ -626,29 +795,21 @@ test("deleteAccount: a current employee is refused BEFORE any resignation histor
   assert.equal(queried, false, "the existing employee rule short-circuits; its message and behavior are unchanged");
 });
 
-test("deleteAccount: the former-employee guard reads no other table", async () => {
-  const touched = [];
-  const tripwire = (model) => new Proxy({}, {
-    get: (_t, method) => async () => {
-      touched.push(`${model}.${String(method)}`);
-      throw new Error(`account deletion must not touch ${model}.${String(method)}`);
+test("deleteAccount: closure never hard-deletes the User row", async () => {
+  const res = response();
+  // The closure path must update the row through the transaction; the ordinary-customer
+  // hard delete must not be reached.
+  const { calls, transactionUsed } = await runClosure(res, {
+    txSpec: {
+      user: { update: async () => ({ id: "emp1" }) },
+      passwordResetToken: { deleteMany: async () => ({ count: 0 }) },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
+      communityProfile: { updateMany: async () => ({ count: 0 }) },
     },
   });
-  const res = response();
-  await withDb(
-    {
-      user: { delete: async () => { throw new Error("must not be called"); } },
-      employeeResignationRequest: { findFirst: async () => APPROVED_RESIGNATION },
-      booking: tripwire("booking"),
-      bookingAssignment: tripwire("bookingAssignment"),
-      employeeLeaveRequest: tripwire("employeeLeaveRequest"),
-      employeeInvitation: tripwire("employeeInvitation"),
-      shiftRequest: tripwire("shiftRequest"),
-    },
-    () => deleteAccount({ user: customer({ id: "emp1" }) }, res),
-  );
-  assert.equal(res.statusCode, 400);
-  assert.deepEqual(touched, [], "the guard is a read-only existence check on the resignation table");
+  assert.equal(transactionUsed, true);
+  assert.ok(callFor(calls, "user", "update"), "the account is updated, not deleted");
+  assert.equal(calls.some((c) => c.method === "delete"), false, "no hard delete is issued");
 });
 
 test("deleteAccount: an approved resignation for a DIFFERENT employee does not protect anyone", async () => {
@@ -669,17 +830,120 @@ test("deleteAccount: an approved resignation for a DIFFERENT employee does not p
   assert.equal(deletedId, "cus1");
 });
 
-test("deleteAccount: refusing a former employee clears no cookie and reports no success", async () => {
+test("deleteAccount: a successful closure clears the auth cookie", async () => {
   const res = response();
   res.cookie("tc_token", "value", {});
+  const { error } = await runClosure(res);
+  assert.equal(error, null);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.cookies.tc_token, undefined, "the session is cleared once the closure commits");
+});
+
+test("deleteAccount: a transaction failure blocks success and keeps the cookie", async () => {
+  const res = response();
+  res.cookie("tc_token", "value", {});
+  // Fail on the LAST write (the CommunityProfile scrub), after the User update and
+  // both credential cleanups, where a partial write would be observable if the
+  // transaction did not roll back. The stubbed transaction cannot itself roll back,
+  // so the guarantee under test is that no success reaches the client and the cookie
+  // is not cleared when the transaction rejects.
+  const { error } = await runClosure(res, {
+    failOn: { model: "communityProfile", method: "updateMany" },
+  });
+  assert.ok(error, "the transaction error is not swallowed");
+  assert.equal(res.statusCode, null, "no success response is sent");
+  assert.equal(res.body, null);
+  assert.ok(res.cookies.tc_token, "the session survives a failed closure; no cookie is cleared");
+});
+
+// ---- reserved system email namespace (closure collision prevention) ----
+//
+// Account closure rewrites a former employee's email to
+// `deleted+<userId>@deleted.invalid`. Publicly-created accounts must never be
+// able to occupy that namespace, or the closure's email write could collide with
+// an existing account on the User.email unique constraint. The domain is reserved
+// case-insensitively at the shared validator so both creation paths inherit it.
+
+test("isEmail: the reserved @deleted.invalid domain is rejected case-insensitively", () => {
+  for (const bad of [
+    "deleted@deleted.invalid",
+    "deleted+abc@deleted.invalid",
+    "DELETED+ABC@DELETED.INVALID",
+    "anything@DELETED.INVALID",
+    "Deleted+User@Deleted.Invalid",
+  ]) {
+    assert.equal(isEmail(bad), false, `${bad} must be reserved`);
+  }
+  for (const good of [
+    "normal@gmail.com",
+    "deleted@gmail.com",
+    "deleted+abc@gmail.com",
+    "user@example.com",
+    "another.valid@domain.co",
+  ]) {
+    assert.equal(isEmail(good), true, `${good} must remain a valid email`);
+  }
+});
+
+test("register: a public registration cannot occupy the reserved @deleted.invalid domain", async () => {
+  for (const email of [
+    "deleted@deleted.invalid",
+    "deleted+abc@deleted.invalid",
+    "DELETED+ABC@DELETED.INVALID",
+  ]) {
+    const res = response();
+    let created = false;
+    await withDb(
+      {
+        user: {
+          findUnique: async () => null,
+          create: async () => { created = true; return {}; },
+        },
+      },
+      () => register({ body: { name: "Mallory", email, password: "password123" } }, res),
+    );
+    assert.equal(res.statusCode, 400, `${email} must be refused`);
+    assert.equal(created, false, `${email} must never create an account`);
+  }
+});
+
+test("register: an ordinary email is still accepted (reservation does not over-reach)", async () => {
+  const res = response();
+  let created = null;
   await withDb(
     {
-      user: { delete: async () => { throw new Error("must not be called"); } },
-      employeeResignationRequest: { findFirst: async () => APPROVED_RESIGNATION },
+      user: {
+        findUnique: async () => null,
+        create: async ({ data }) => { created = data; return { id: "u1", ...data }; },
+      },
     },
-    () => deleteAccount({ user: customer({ id: "emp1" }) }, res),
+    () => register({ body: { name: "Ada", email: "deleted+abc@gmail.com", password: "password123" } }, res),
   );
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.body.ok, undefined, "a refused deletion must not report success");
-  assert.ok(res.cookies.tc_token, "the session survives a refused deletion; only a real deletion clears the cookie");
+  assert.equal(res.statusCode, 201);
+  assert.equal(created.email, "deleted+abc@gmail.com");
+});
+
+test("adminCreateEmployee: the reserved @deleted.invalid domain is refused", async () => {
+  const { adminCreateEmployee } = await import("../src/controllers/employees.js");
+  for (const email of ["deleted+abc@deleted.invalid", "DELETED+ABC@DELETED.INVALID"]) {
+    const res = response();
+    let created = false;
+    await withDb(
+      {
+        user: {
+          findUnique: async () => null,
+          create: async () => { created = true; return {}; },
+        },
+      },
+      () =>
+        adminCreateEmployee(
+          { user: admin(), body: { name: "Erin", email } },
+          res,
+          undefined,
+          { issueInvitation: async () => ({ ok: true }) },
+        ),
+    );
+    assert.equal(res.statusCode, 400, `${email} must be refused`);
+    assert.equal(created, false, `${email} must never create an employee`);
+  }
 });

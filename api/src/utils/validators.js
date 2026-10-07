@@ -15,8 +15,25 @@ export function badRequest(res, msg) {
   return res.status(400).json({ error: msg });
 }
 
+// Reserved system namespace used by former-employee account closure: a closed
+// account's email is rewritten to `deleted+<userId>@deleted.invalid` (see
+// deleteAccount in controllers/auth.js). Publicly-created accounts must never
+// be able to occupy that namespace, or the closure's email write could collide
+// with an existing account on the User.email unique constraint. The whole
+// domain is reserved, case-insensitively. The closure itself writes the address
+// directly, so it does not go through this validator.
+export const RESERVED_EMAIL_DOMAIN = "deleted.invalid";
+
+export function isReservedEmail(v) {
+  return typeof v === "string" && v.toLowerCase().endsWith(`@${RESERVED_EMAIL_DOMAIN}`);
+}
+
 export function isEmail(v) {
-  return typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  return (
+    typeof v === "string" &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) &&
+    !isReservedEmail(v)
+  );
 }
 
 export function isDate(v) {

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import prisma from "../utils/prisma.js";
 import { hashPassword, verifyPassword } from "../utils/password.js";
 import { signToken } from "../utils/jwt.js";
@@ -142,7 +143,17 @@ export async function updateProfile(req, res) {
   res.json({ user: publicUser(user) });
 }
 
-// "Delete Account" — removes the customer and their bookings/receipts (cascade).
+// "Delete Account".
+//
+// An ORDINARY customer is removed exactly as before: the User row is hard-deleted
+// and their bookings/receipts cascade (pre-existing behavior, unchanged).
+//
+// A FORMER EMPLOYEE (role already flipped to "customer" by an approved resignation)
+// carries employment history that must survive, so their account is CLOSED IN PLACE
+// instead: the User row is retained as the anchor for that history and is anonymized
+// + disabled in a single transaction. Hard-deleting it would cascade the approved
+// EmployeeResignationRequest and the employee's leave/shift history away, and would
+// null their BookingAssignment attribution.
 export async function deleteAccount(req, res) {
   if (req.user.role === ROLES.ADMIN) {
     return badRequest(res, "Admins cannot delete themselves through this endpoint");
@@ -154,8 +165,8 @@ export async function deleteAccount(req, res) {
   if (req.user.role === ROLES.EMPLOYEE) {
     return badRequest(res, "Employee accounts cannot be deleted; an administrator manages employee access");
   }
-  // A FORMER employee is protected exactly the same way, even though their role is
-  // now "customer" and so no longer matches the check above.
+  // A FORMER employee is handled differently from an ordinary customer, even though
+  // their role is now "customer" and so no longer matches the check above.
   //
   // Why this is a separate check rather than a role check: an approved resignation
   // transitions the role to "customer", so role alone can no longer tell "a person
@@ -165,10 +176,6 @@ export async function deleteAccount(req, res) {
   // source of truth for "this account carries employment records that must
   // survive", and the role transition deliberately added no User column that could
   // answer the question on its own.
-  //
-  // Without this, the role flip would quietly reopen self-deletion for someone whose
-  // User row is the anchor for their assignment history: deleting it cascades that
-  // history away, which is exactly what the employee rule above exists to prevent.
   //
   // Existence only — the index is (employeeId, status), and the projection is a
   // single id, so this is an index-only lookup rather than a history read. No
@@ -181,8 +188,50 @@ export async function deleteAccount(req, res) {
     select: { id: true },
   });
   if (approvedResignation) {
-    return badRequest(res, "This account cannot be deleted; an administrator manages employee records");
+    // Closure, not deletion: keep the User row and every employment/audit record
+    // that hangs off it, but strip the identity and revoke access. The unusable
+    // hash is generated OUTSIDE the transaction so the transaction only writes.
+    const unusablePasswordHash = await hashPassword(randomBytes(32).toString("hex"));
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: req.user.id },
+        data: {
+          // Deterministic and unique because User.id is unique.
+          email: `deleted+${req.user.id}@deleted.invalid`,
+          name: "Deleted User",
+          passwordHash: unusablePasswordHash,
+          phone: null,
+          address: null,
+          stripeCustomerId: null,
+          disabledAt: new Date(),
+          status: "offline",
+        },
+        select: { id: true },
+      });
+      // Outstanding credentials are revoked together with the account.
+      await tx.passwordResetToken.deleteMany({ where: { userId: req.user.id } });
+      await tx.employeeInvitation.deleteMany({ where: { userId: req.user.id } });
+      // The public social identity is anonymized too: group rosters/messages and
+      // the public profile resolve names/avatars from CommunityProfile, which
+      // would otherwise keep exposing the former employee after closure. The row
+      // is kept; updateMany (not update) makes a user with no profile a
+      // successful no-op rather than a P2025 error.
+      await tx.communityProfile.updateMany({
+        where: { userId: req.user.id },
+        data: {
+          displayName: "Deleted User",
+          bio: null,
+          avatarUrl: null,
+          locationCity: null,
+          locationState: null,
+        },
+      });
+    });
+    // The cookie is cleared only once the closure committed.
+    res.clearCookie(COOKIE_NAME, { path: "/" });
+    return res.json({ ok: true });
   }
+  // Ordinary customer: unchanged hard deletion (cascades to their own records).
   await prisma.user.delete({ where: { id: req.user.id } });
   res.clearCookie(COOKIE_NAME, { path: "/" });
   res.json({ ok: true });
