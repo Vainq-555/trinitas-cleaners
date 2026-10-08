@@ -7,6 +7,7 @@ import { badRequest, isEmail } from "../utils/validators.js";
 import { createRecoveryRateLimiters } from "../utils/rateLimit.js";
 import { requestPasswordReset, performPasswordReset, isValidNewPassword } from "../utils/passwordRecovery.js";
 import { activateWithToken } from "../utils/employeeInvitation.js";
+import { scheduleSubscriptionCancellationForUser } from "./subscriptions.js";
 
 // Lightweight in-memory rate limiter for the recovery flow (see rateLimit.js).
 const recoveryLimits = createRecoveryRateLimiters();
@@ -154,7 +155,11 @@ export async function updateProfile(req, res) {
 // + disabled in a single transaction. Hard-deleting it would cascade the approved
 // EmployeeResignationRequest and the employee's leave/shift history away, and would
 // null their BookingAssignment attribution.
-export async function deleteAccount(req, res) {
+// `deps` is dependency-injected as the fourth parameter (same style as
+// adminCreateEmployee): Express only ever passes (req, res, next), so production
+// always schedules Stripe cancellations with the real helper; tests inject a stub.
+export async function deleteAccount(req, res, _next, deps = {}) {
+  const { cancelSubscriptions = scheduleSubscriptionCancellationForUser } = deps;
   if (req.user.role === ROLES.ADMIN) {
     return badRequest(res, "Admins cannot delete themselves through this endpoint");
   }
@@ -192,7 +197,11 @@ export async function deleteAccount(req, res) {
     // that hangs off it, but strip the identity and revoke access. The unusable
     // hash is generated OUTSIDE the transaction so the transaction only writes.
     const unusablePasswordHash = await hashPassword(randomBytes(32).toString("hex"));
-    await prisma.$transaction(async (tx) => {
+    // Live recurring subscriptions are marked for period-end cancellation INSIDE
+    // this transaction (durable local state), but the Stripe API calls run AFTER
+    // commit — a DB transaction must never stay open across an external Stripe
+    // round-trip (see scheduleSubscriptionCancellationForUser).
+    const subscriptionsForCancellation = await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: req.user.id },
         data: {
@@ -226,7 +235,50 @@ export async function deleteAccount(req, res) {
           locationState: null,
         },
       });
+      // Recurring billing: enumerate EVERY live Stripe-backed subscription owned
+      // by this user and durably schedule period-end cancellation. Pre-billing
+      // rows without a Stripe subscription and already-ended rows are left
+      // untouched (nothing to cancel; no charge is possible). The Stripe calls
+      // themselves happen in the post-commit step, so the transaction only writes
+      // the local cancelAtPeriodEnd marker. finalCancel* fields are NOT touched:
+      // the existing final-month workflow stays authoritative for term end.
+      const subscriptions = await tx.subscription.findMany({
+        where: { customerId: req.user.id },
+        select: { id: true, stripeSubscriptionId: true, idempotencyKey: true, status: true, cancelAtPeriodEnd: true },
+      });
+      const captured = [];
+      for (const sub of subscriptions) {
+        if (!sub.stripeSubscriptionId || sub.status === "canceled" || sub.status === "completed") continue;
+        const wasAlreadyScheduled = sub.cancelAtPeriodEnd;
+        // Only write when Stripe has not already been asked (the flag is set by
+        // confirmed paths); an already-scheduled subscription is merely captured
+        // so the post-commit step can skip its Stripe call.
+        if (!wasAlreadyScheduled) {
+          await tx.subscription.update({ where: { id: sub.id }, data: { cancelAtPeriodEnd: true } });
+        }
+        captured.push({
+          subscriptionId: sub.id,
+          stripeSubscriptionId: sub.stripeSubscriptionId,
+          idempotencyKey: sub.idempotencyKey,
+          status: sub.status,
+          wasAlreadyScheduled,
+        });
+      }
+      return captured;
     });
+    // Stripe confirmation happens only once the closure committed. Each captured
+    // subscription is cancelled independently; a Stripe failure never rolls the
+    // closure back (it is already committed) and the durable cancelAtPeriodEnd
+    // state stays for reconciliation/retry with the :closure-cancel idempotency
+    // key. Follows the same post-commit, never-throws posture as the webhook's
+    // finalizeStripeCancelAtPeriodEnd step.
+    if (subscriptionsForCancellation.length > 0) {
+      try {
+        await cancelSubscriptions({ userId: req.user.id, subscriptions: subscriptionsForCancellation });
+      } catch (error) {
+        console.error("[account closure] Stripe cancellation scheduling failed after commit — durable cancelAtPeriodEnd=true left for reconciliation", { code: error?.code });
+      }
+    }
     // The cookie is cleared only once the closure committed.
     res.clearCookie(COOKIE_NAME, { path: "/" });
     return res.json({ ok: true });

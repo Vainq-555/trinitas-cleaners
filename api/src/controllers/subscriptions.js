@@ -585,3 +585,75 @@ export async function finalizeStripeCancelAtPeriodEnd({ subscriptionId }, deps =
   });
   return { ok: true };
 }
+
+// =============================================================================
+// PART I — Account-closure cancellation (period-end, durable, reconciliation-safe)
+// =============================================================================
+
+// Schedules cancel_at_period_end on Stripe for every live recurring subscription
+// owned by a closed former-employee account. Called AFTER the closure Prisma
+// transaction commits (auth.deleteAccount) — never inside a DB transaction and
+// never performing DB writes. The closure transaction has ALREADY persisted the
+// durable local marker cancelAtPeriodEnd=true and passes the captured eligible
+// subscriptions here, so this helper only talks to Stripe.
+//
+// Semantics mirror cancelSubscription / finalizeStripeCancelAtPeriodEnd:
+//   - period-end cancellation only (NEVER immediate, NEVER a refund)
+//   - wasAlreadyScheduled subscriptions are skipped: their Stripe state was
+//     already confirmed by whichever path set the flag
+//   - pre-billing subscriptions without a Stripe subscription are skipped
+//   - canceled/completed subscriptions are skipped
+//   - every eligible subscription is handled independently: one Stripe failure
+//     neither aborts the loop nor throws into the closure caller, so account
+//     closure always succeeds
+//   - Stripe unavailable/not configured leaves the durable cancelAtPeriodEnd=true
+//     in place for future reconciliation — success is never fabricated
+//
+// Retries are safe: each call uses the dedicated `${sub.idempotencyKey}:closure-cancel`
+// idempotency key, so a replayed request cannot create a second Stripe update.
+//
+// `subscriptions` may be omitted for a reconciliation-style invocation, in which
+// case the user's subscriptions are loaded from the db.
+export async function scheduleSubscriptionCancellationForUser({ userId, subscriptions } = {}, deps = {}) {
+  const db = deps.db || prisma;
+  // `!== undefined` (not `??`) so callers can explicitly inject a null client to
+  // represent Stripe-not-configured instead of accidentally falling through to a
+  // live (or missing) configured client.
+  const client = deps.stripeClient !== undefined ? deps.stripeClient : (stripeSecretKeyMode() ? stripe : null);
+  const rows = subscriptions ?? (await db.subscription.findMany({ where: { customerId: userId } }));
+  const results = [];
+  for (const sub of rows) {
+    results.push(await scheduleOneCancelAtPeriodEnd(sub, client));
+  }
+  return results;
+}
+
+async function scheduleOneCancelAtPeriodEnd(sub, client) {
+  const subscriptionId = sub.subscriptionId ?? sub.id;
+  if (!sub.stripeSubscriptionId) {
+    return { subscriptionId, skipped: "no-stripe-subscription" };
+  }
+  if (sub.status === "canceled" || sub.status === "completed") {
+    return { subscriptionId, skipped: "ended" };
+  }
+  if (sub.wasAlreadyScheduled) {
+    return { subscriptionId, skipped: "already-scheduled" };
+  }
+  if (!client) {
+    return { subscriptionId, attempted: false, ok: false, error: { code: "STRIPE_NOT_CONFIGURED" } };
+  }
+  try {
+    await client.subscriptions.update(
+      sub.stripeSubscriptionId,
+      { cancel_at_period_end: true },
+      { idempotencyKey: `${sub.idempotencyKey}:closure-cancel` },
+    );
+    return { subscriptionId, attempted: true, ok: true };
+  } catch (error) {
+    console.error("[account closure] Stripe cancel-at-period-end failed — durable cancelAtPeriodEnd=true left for reconciliation", {
+      subscriptionId,
+      code: error?.code,
+    });
+    return { subscriptionId, attempted: true, ok: false, error: { code: error?.code } };
+  }
+}

@@ -550,6 +550,7 @@ async function runClosure(res, {
   resignations = [{ id: "rs1", employeeId: "emp1", status: "approved" }],
   txSpec,
   failOn,
+  deps = {},
 } = {}) {
   const calls = [];
   const spec = txSpec ?? {
@@ -557,6 +558,9 @@ async function runClosure(res, {
     passwordResetToken: { deleteMany: async () => ({ count: 1 }) },
     employeeInvitation: { deleteMany: async () => ({ count: 1 }) },
     communityProfile: { updateMany: async () => ({ count: 1 }) },
+    // By default the closed user has no subscriptions; the closure still reads
+    // the table to check for live recurring billing.
+    subscription: { findMany: async () => [] },
   };
   const tx = {};
   for (const [model, methods] of Object.entries(spec)) {
@@ -583,7 +587,7 @@ async function runClosure(res, {
         },
         user: { delete: async ({ where }) => ({ id: where.id }) },
       },
-      () => deleteAccount({ user }, res),
+      () => deleteAccount({ user }, res, undefined, deps),
     );
   } catch (e) {
     error = e;
@@ -640,10 +644,12 @@ test("deleteAccount: closure removes outstanding credentials, preserving employm
   assert.equal(invite.args.where.userId, "emp1", "only the closed account's invitations are removed");
 
   // Only the account row, the two credential tables and the social profile are
-  // written. No booking, assignment, leave, shift, availability, receipt, review,
-  // subscription or resignation table is touched, so all employment/audit history
-  // survives.
-  const written = [...new Set(calls.map((c) => c.model))].sort();
+  // WRITTEN. The subscription table is READ (to enumerate live recurring billing)
+  // but never written when no subscription exists. No booking, assignment, leave,
+  // shift, availability, receipt, review, subscription or resignation table is
+  // written, so all employment/audit history survives.
+  const writes = calls.filter((c) => c.method !== "findMany");
+  const written = [...new Set(writes.map((c) => c.model))].sort();
   assert.deepEqual(written, ["communityProfile", "employeeInvitation", "passwordResetToken", "user"]);
   for (const forbidden of [
     "employeeResignationRequest",
@@ -657,8 +663,9 @@ test("deleteAccount: closure removes outstanding credentials, preserving employm
     "shiftRequest",
     "employeeAvailability",
   ]) {
-    assert.equal(calls.some((c) => c.model === forbidden), false, `${forbidden} must not be touched`);
+    assert.equal(writes.some((c) => c.model === forbidden), false, `${forbidden} must not be written`);
   }
+  assert.ok(callFor(calls, "subscription", "findMany"), "the closure enumerates the user's subscriptions");
 });
 
 test("deleteAccount: closure anonymizes the CommunityProfile in the same transaction", async () => {
@@ -694,6 +701,7 @@ test("deleteAccount: a former employee with NO CommunityProfile still closes suc
       passwordResetToken: { deleteMany: async () => ({ count: 0 }) },
       employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
       communityProfile: { updateMany: async () => ({ count: 0 }) },
+      subscription: { findMany: async () => [] },
     },
   });
   assert.equal(error, null, "a missing CommunityProfile must not fail closure");
@@ -805,6 +813,7 @@ test("deleteAccount: closure never hard-deletes the User row", async () => {
       passwordResetToken: { deleteMany: async () => ({ count: 0 }) },
       employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
       communityProfile: { updateMany: async () => ({ count: 0 }) },
+      subscription: { findMany: async () => [] },
     },
   });
   assert.equal(transactionUsed, true);
@@ -854,6 +863,129 @@ test("deleteAccount: a transaction failure blocks success and keeps the cookie",
   assert.equal(res.statusCode, null, "no success response is sent");
   assert.equal(res.body, null);
   assert.ok(res.cookies.tc_token, "the session survives a failed closure; no cookie is cleared");
+});
+
+// ---- Stripe subscription cancellation during closure ----
+
+test("deleteAccount: schedules closure cancellation for live Stripe-backed subscription", async () => {
+  const res = response();
+  const cancelCalls = [];
+  const { error, transactionUsed } = await runClosure(res, {
+    txSpec: {
+      user: { update: async () => ({ id: "emp1" }) },
+      passwordResetToken: { deleteMany: async () => ({ count: 0 }) },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
+      communityProfile: { updateMany: async () => ({ count: 0 }) },
+      subscription: {
+        findMany: async () => [
+          {
+            id: "sub_1",
+            stripeSubscriptionId: "sub_stripe_1",
+            idempotencyKey: "idem-1",
+            status: "active",
+            cancelAtPeriodEnd: false,
+          },
+        ],
+        update: async ({ data }) => ({ id: "sub_1", ...data }),
+      },
+    },
+    deps: {
+      cancelSubscriptions: async ({ userId, subscriptions }) => {
+        cancelCalls.push({ userId, subscriptions });
+      },
+    },
+  });
+  assert.equal(error, null);
+  assert.equal(res.statusCode, 200);
+  assert.equal(transactionUsed, true);
+  assert.equal(cancelCalls.length, 1);
+  assert.equal(cancelCalls[0].userId, "emp1");
+  assert.equal(cancelCalls[0].subscriptions.length, 1);
+  const captured = cancelCalls[0].subscriptions[0];
+  assert.equal(captured.stripeSubscriptionId, "sub_stripe_1");
+  assert.equal(captured.idempotencyKey, "idem-1");
+  assert.equal(captured.status, "active");
+  assert.equal(captured.wasAlreadyScheduled, false);
+});
+
+test("deleteAccount: schedules closure cancellation for multiple subscriptions", async () => {
+  const cancelCalls = [];
+  const res = response();
+  await runClosure(res, {
+    txSpec: {
+      user: { update: async () => ({ id: "emp1" }) },
+      passwordResetToken: { deleteMany: async () => ({ count: 0 }) },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
+      communityProfile: { updateMany: async () => ({ count: 0 }) },
+      subscription: {
+        findMany: async () => [
+          { id: "sub_1", stripeSubscriptionId: "sub_stripe_1", idempotencyKey: "i1", status: "active", cancelAtPeriodEnd: false },
+          { id: "sub_2", stripeSubscriptionId: "sub_stripe_2", idempotencyKey: "i2", status: "past_due", cancelAtPeriodEnd: false },
+        ],
+        update: async ({ where, data }) => ({ id: where.id, ...data }),
+      },
+    },
+    deps: { cancelSubscriptions: async ({ subscriptions }) => { cancelCalls.push(subscriptions); } },
+  });
+  assert.equal(cancelCalls.length, 1);
+  assert.equal(cancelCalls[0].length, 2);
+});
+
+test("deleteAccount: skips already-scheduled, no-Stripe, canceled and completed subscriptions", async () => {
+  const cancelCalls = [];
+  const res = response();
+  await runClosure(res, {
+    txSpec: {
+      user: { update: async () => ({ id: "emp1" }) },
+      passwordResetToken: { deleteMany: async () => ({ count: 0 }) },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
+      communityProfile: { updateMany: async () => ({ count: 0 }) },
+      subscription: {
+        findMany: async () => [
+          { id: "sub_ok", stripeSubscriptionId: "sub_stripe_ok", idempotencyKey: "i1", status: "active", cancelAtPeriodEnd: false },
+          { id: "sub_sched", stripeSubscriptionId: "sub_stripe_sched", idempotencyKey: "i2", status: "active", cancelAtPeriodEnd: true },
+          { id: "sub_nostripe", stripeSubscriptionId: null, idempotencyKey: "i3", status: "pending", cancelAtPeriodEnd: false },
+          { id: "sub_canceled", stripeSubscriptionId: "sub_stripe_cx", idempotencyKey: "i4", status: "canceled", cancelAtPeriodEnd: true },
+          { id: "sub_completed", stripeSubscriptionId: "sub_stripe_comp", idempotencyKey: "i5", status: "completed", cancelAtPeriodEnd: true },
+        ],
+        update: async ({ where, data }) => ({ id: where.id, ...data }),
+      },
+    },
+    deps: { cancelSubscriptions: async ({ subscriptions }) => { cancelCalls.push(subscriptions); } },
+  });
+  assert.equal(cancelCalls.length, 1);
+  assert.equal(cancelCalls[0].length, 2);
+  const ids = cancelCalls[0].map((s) => s.subscriptionId).sort();
+  assert.deepEqual(ids, ["sub_ok", "sub_sched"]);
+  const sched = cancelCalls[0].find((s) => s.subscriptionId === "sub_sched");
+  assert.equal(sched.wasAlreadyScheduled, true);
+});
+
+test("deleteAccount: Stripe cancellation failure after commit does not block closure", async () => {
+  const res = response();
+  const { error } = await runClosure(res, {
+    txSpec: {
+      user: { update: async () => ({ id: "emp1" }) },
+      passwordResetToken: { deleteMany: async () => ({ count: 0 }) },
+      employeeInvitation: { deleteMany: async () => ({ count: 0 }) },
+      communityProfile: { updateMany: async () => ({ count: 0 }) },
+      subscription: {
+        findMany: async () => [
+          { id: "sub_1", stripeSubscriptionId: "sub_stripe_1", idempotencyKey: "i1", status: "active", cancelAtPeriodEnd: false },
+        ],
+        update: async () => ({ id: "sub_1", cancelAtPeriodEnd: true }),
+      },
+    },
+    deps: {
+      cancelSubscriptions: async () => {
+        throw new Error("stripe down");
+      },
+    },
+  });
+  assert.equal(error, null);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { ok: true });
+  assert.equal(res.cookies.tc_token, undefined);
 });
 
 // ---- reserved system email namespace (closure collision prevention) ----
