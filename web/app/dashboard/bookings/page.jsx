@@ -256,6 +256,11 @@ export default function BookingsPage() {
                           Monthly
                         </span>
                       )}
+                      {b.employeeAssignments?.[0]?.employee?.name && (
+                        <div className="mt-1 text-xs font-normal text-muted">
+                          Assigned to: {b.employeeAssignments[0].employee.name}
+                        </div>
+                      )}
                     </td>
                     <td className="text-muted">{fmtDate(b.date)}</td>
                     <td>

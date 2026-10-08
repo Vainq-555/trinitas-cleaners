@@ -20,6 +20,13 @@ const bookingInclude = {
   customer: {
     select: { id: true, name: true, email: true, phone: true, address: true },
   },
+  employeeAssignments: {
+    select: {
+      employee: {
+        select: { name: true },
+      },
+    },
+  },
 };
 
 // Admin-only booking include. Deliberately NOT added to `bookingInclude`
