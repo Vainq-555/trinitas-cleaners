@@ -13,6 +13,7 @@ import { effectiveMonthlyPriceCents } from "../src/controllers/services.js";
 
 const response = () => ({ statusCode: null, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
 
+const futureISO = (offsetMs = 25 * 60 * 60 * 1000) => new Date(Date.now() + offsetMs).toISOString();
 const monthlyService = (overrides = {}) => ({
   id: "s1",
   name: "Weekly Cleaning",
@@ -113,7 +114,7 @@ test("createSubscriptionBooking creates the request booking + pending Subscripti
   try {
     const res = response();
     await createSubscriptionBooking(
-      { body: { serviceId: "s1", date: "2026-10-01T15:00:00Z", months: 3, note: "hi" }, user: { id: "u1", name: "Ada" } },
+      { body: { serviceId: "s1", date: futureISO(), months: 3, note: "hi" }, user: { id: "u1", name: "Ada" } },
       res,
     );
     assert.equal(res.statusCode, 201);
@@ -143,7 +144,7 @@ test("createSubscriptionBooking applies the customer-specific monthly override t
   const original = stubCreateSubscription({ service: monthlyService(), customPrice: { monthlyPriceCents: 5500 }, existingTx: tx });
   try {
     const res = response();
-    await createSubscriptionBooking({ body: { serviceId: "s1", date: "2026-10-01T15:00:00Z", months: 1 }, user: { id: "u1", name: "Ada" } }, res);
+    await createSubscriptionBooking({ body: { serviceId: "s1", date: futureISO(), months: 1 }, user: { id: "u1", name: "Ada" } }, res);
     assert.equal(res.statusCode, 201);
     assert.equal(created[0].subscription.create.monthlyPriceCents, 5500);
     assert.equal(created[0].basePriceCents, 5500);
@@ -158,7 +159,7 @@ test("createSubscriptionBooking rejects invalid terms, past dates, and unavailab
   try {
     for (const months of [0, 13, 1.5, "3", null, undefined]) {
       const res = response();
-      await createSubscriptionBooking({ body: { serviceId: "s1", date: "2026-10-01T15:00:00Z", months }, user: { id: "u1" } }, res);
+      await createSubscriptionBooking({ body: { serviceId: "s1", date: futureISO(), months }, user: { id: "u1" } }, res);
       assert.equal(res.statusCode, 400, `months=${months}`);
     }
     const past = response();
@@ -167,17 +168,17 @@ test("createSubscriptionBooking rejects invalid terms, past dates, and unavailab
 
     prisma.service.findUnique = async () => monthlyService({ isActive: false });
     const inactive = response();
-    await createSubscriptionBooking({ body: { serviceId: "s1", date: "2026-10-01T15:00:00Z", months: 1 }, user: { id: "u1" } }, inactive);
+    await createSubscriptionBooking({ body: { serviceId: "s1", date: futureISO(), months: 1 }, user: { id: "u1" } }, inactive);
     assert.equal(inactive.statusCode, 400);
 
     prisma.service.findUnique = async () => monthlyService({ monthlyActive: false, monthlyPriceCents: 4000 });
     const notMonthly = response();
-    await createSubscriptionBooking({ body: { serviceId: "s1", date: "2026-10-01T15:00:00Z", months: 1 }, user: { id: "u1" } }, notMonthly);
+    await createSubscriptionBooking({ body: { serviceId: "s1", date: futureISO(), months: 1 }, user: { id: "u1" } }, notMonthly);
     assert.equal(notMonthly.statusCode, 400);
 
     prisma.service.findUnique = async () => monthlyService({ monthlyPriceCents: null });
     const noPrice = response();
-    await createSubscriptionBooking({ body: { serviceId: "s1", date: "2026-10-01T15:00:00Z", months: 1 }, user: { id: "u1" } }, noPrice);
+    await createSubscriptionBooking({ body: { serviceId: "s1", date: futureISO(), months: 1 }, user: { id: "u1" } }, noPrice);
     assert.equal(noPrice.statusCode, 400);
   } finally {
     restorePrisma(original);
