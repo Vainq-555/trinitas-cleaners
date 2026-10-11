@@ -258,14 +258,16 @@ test("leave: the employee flow posts to /employee/leave and only reads it back",
 });
 
 test("leave: the admin queue is reachable from the existing admin navigation", () => {
-  // The leave page carries its own nav, and the employees hub (where an admin
-  // already goes to manage employees) links to it, so the queue is discoverable
-  // without knowing the URL.
+  // The shared admin nav carries the link, and both the leave page and the
+  // employees hub (where an admin already goes to manage employees) render that
+  // nav, so the queue is discoverable without knowing the URL.
   for (const rel of ["../app/admin/leave/page.jsx", "../app/admin/employees/page.jsx"]) {
     const src = code(rel);
-    assert.match(src, /href:\s*["']\/admin\/leave["']/, `${rel} must link the admin queue`);
-    assert.match(src, /CalendarOff/, `${rel} must import the icon it uses`);
+    assert.match(src, /adminNavLinks\(\)/, `${rel} must render the shared admin nav`);
   }
+  const adminNav = code("../lib/adminNav.jsx");
+  assert.match(adminNav, /href:\s*["']\/admin\/leave["']/, "the shared admin nav must link the admin queue");
+  assert.match(adminNav, /CalendarOff/, "the shared admin nav must import the icon it uses");
 });
 
 test("leave: the employee portal links the new page from its own navigation", () => {

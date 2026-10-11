@@ -224,14 +224,16 @@ test("the shared employee nav exposes Contact Admin", () => {
 test("the employee nav offers exactly the built employee destinations", () => {
   const hrefs = [...nav.matchAll(/href: "([^"]+)"/g)].map((m) => m[1]);
   // Phase 2B-4 added My Availability and Available Shifts; Phase 2B-5 added the
-  // employee Community; employee leave added My Leave. The list is exact so a new
-  // destination cannot be added without this test being updated too.
+  // employee Community; employee leave added My Leave; employee resignation added
+  // Resignation. The list is exact so a new destination cannot be added without
+  // this test being updated too.
   assert.deepEqual(hrefs, [
     "/employee",
     "/employee/assignments",
     "/employee/availability",
     "/employee/shifts",
     "/employee/leave",
+    "/employee/resignation",
     "/employee/community",
     "/employee/broadcasts",
     "/employee/messages",

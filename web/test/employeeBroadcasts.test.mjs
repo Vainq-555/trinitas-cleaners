@@ -129,6 +129,7 @@ const nav = source("../lib/employeeNav.jsx");
 const navCode = code("../lib/employeeNav.jsx");
 const adminPage = source("../app/admin/broadcasts/page.jsx");
 const adminCode = code("../app/admin/broadcasts/page.jsx");
+const adminNavCode = code("../lib/adminNav.jsx");
 const dashboardCode = code("../app/employee/page.jsx");
 const listPageCode = code("../app/employee/assignments/page.jsx");
 const layout = source("../app/employee/layout.jsx");
@@ -352,9 +353,14 @@ test("the admin history labels each row's audience, so nothing reads as a bare '
   assert.match(adminCode, /"All customers"/);
   assert.match(adminCode, /Specific employee/);
   assert.match(adminCode, /Specific customer/);
-  // Still one shared Shell, existing nav untouched.
+  // Still one shared Shell, and the nav now comes from the shared admin helper
+  // rather than an inline copy on this page.
   assert.match(adminCode, /sections=\{\["Admin Portal"\]\}/);
-  assert.match(adminCode, /\{ href: "\/admin\/broadcasts", label: "Broadcasts"/);
+  assert.match(adminCode, /adminNavLinks\(\)/);
+  assert.match(
+    adminNavCode,
+    /\{ href: "\/admin\/broadcasts", label: "Broadcasts", icon: Megaphone \}/,
+  );
 });
 
 test("the admin page still sends every field the create endpoint requires", () => {

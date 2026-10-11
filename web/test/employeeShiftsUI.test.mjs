@@ -400,13 +400,14 @@ test("the employee nav offers exactly the destinations that exist, in order", ()
   const nav = source("../lib/employeeNav.jsx");
   const hrefs = [...nav.matchAll(/href: "([^"]+)"/g)].map((m) => m[1]);
   // Exact and ordered, so a new destination cannot be added without this test being
-  // updated too. My Leave was added after Available Shifts.
+  // updated too. My Leave was added after Available Shifts, then Resignation.
   assert.deepEqual(hrefs, [
     "/employee",
     "/employee/assignments",
     "/employee/availability",
     "/employee/shifts",
     "/employee/leave",
+    "/employee/resignation",
     "/employee/community",
     "/employee/broadcasts",
     "/employee/messages",
