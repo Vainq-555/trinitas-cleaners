@@ -4,7 +4,14 @@ import router from "../src/routes/index.js";
 import prisma from "../src/utils/prisma.js";
 import { signToken } from "../src/utils/jwt.js";
 import { authenticate, requireAdmin } from "../src/middleware/auth.js";
-import { adminCreateReceipt, receiptDetail, downloadReceiptPdf } from "../src/controllers/receipts.js";
+import {
+  adminCreateReceipt,
+  adminListReceipts,
+  listMyReceipts,
+  receiptDetail,
+  downloadReceiptPdf,
+  receiptCustomerSelect,
+} from "../src/controllers/receipts.js";
 import { receiptSnapshotData } from "../src/controllers/payments.js";
 
 const response = () => ({ statusCode: null, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
@@ -29,7 +36,7 @@ const AUTHORITATIVE_BOOKING = {
 };
 
 const makeDb = (booking = AUTHORITATIVE_BOOKING) => {
-  const calls = { bookingFind: 0, receiptCreate: [], broadcastCreate: [], userFind: 0 };
+  const calls = { bookingFind: 0, receiptCreate: [], broadcastCreate: [], userFind: 0, receiptInclude: null };
   const db = {
     booking: {
       findUnique: async ({ where }) => {
@@ -39,8 +46,9 @@ const makeDb = (booking = AUTHORITATIVE_BOOKING) => {
       },
     },
     receipt: {
-      create: async ({ data }) => {
+      create: async ({ data, include }) => {
         calls.receiptCreate.push(data);
+        calls.receiptInclude = include;
         return { id: "r_snapshot", ...data, customer: { id: data.customerId }, booking: { service: {} } };
       },
     },
@@ -248,15 +256,53 @@ const makeReceipt = (overrides = {}) => ({
   baseAmountCents: 4000, discountCents: 0, taxableSubtotalCents: 4000,
   taxRateBasisPoints: 725, taxCents: 290, finalAmountCents: 4290,
   createdAt: new Date(), updatedAt: new Date(),
-  customer: { id: "u1", name: "Ada Lovelace", email: "ada@example.com", address: "1 Main St", phone: "555" },
+  // Sentinels: a receipt response must never carry these User columns. Prisma's
+  // `select` is what drops them, so the fake below applies the same projection the
+  // controller requests.
+  customer: {
+    id: "u1", name: "Ada Lovelace", email: "ada@example.com", address: "1 Main St", phone: "555",
+    passwordHash: "$2b$12$receipt-sentinel-hash",
+    stripeCustomerId: "cus_receipt_sentinel",
+    disabledAt: null,
+    communityBlockedAt: null,
+    lastActiveAt: new Date("2026-01-01T00:00:00Z"),
+    role: "customer",
+    status: "online",
+  },
   booking: { id: "b1", date: new Date(), service: { id: "s1", name: "Deep Clean" } },
   ...overrides,
 });
 
+// Minimal stand-in for Prisma's relation projection: `customer: true` (or a bare
+// include) returns every column; `customer: { select: {...} }` returns only the
+// selected ones. This is what makes the sentinel assertions meaningful — they fail
+// the moment the controller stops restricting the projection.
+const SENSITIVE_CUSTOMER_FIELDS = [
+  "passwordHash",
+  "stripeCustomerId",
+  "disabledAt",
+  "communityBlockedAt",
+  "lastActiveAt",
+  "role",
+  "status",
+];
+
+const applyCustomerProjection = (receipt, args) => {
+  if (!receipt) return receipt;
+  const projection = args?.include?.customer;
+  if (!projection || projection === true || !projection.select) return receipt;
+  const customer = {};
+  for (const key of Object.keys(projection.select)) {
+    if (projection.select[key]) customer[key] = receipt.customer[key];
+  }
+  return { ...receipt, customer };
+};
+
 async function requestReceiptDetail({ userId = "u1", role = "customer", receipt, paramId } = {}) {
   const originalReceiptFind = prisma.receipt.findUnique;
   const originalUserFind = prisma.user.findUnique;
-  prisma.receipt.findUnique = async ({ where }) => (receipt && receipt.id === where.id ? receipt : null);
+  prisma.receipt.findUnique = async (args) =>
+    receipt && receipt.id === args.where.id ? applyCustomerProjection(receipt, args) : null;
   prisma.user.findUnique = async ({ where }) => (where.id === userId ? makeUser(userId, role) : null);
   const res = makeRes();
   const req = {
@@ -318,6 +364,71 @@ test("receiptDetail: admin can view any customer's receipt → 200 (existing adm
   const res = await requestReceiptDetail({ userId: "a1", role: "admin", receipt: makeReceipt({ customerId: "u2" }) });
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.receipt.customerId, "u2");
+});
+
+// ---- Customer data minimization on receipt responses ----
+
+test("receiptCustomerSelect exposes exactly the fields the PDF and receipt UI render", () => {
+  assert.deepEqual(Object.keys(receiptCustomerSelect).sort(), ["address", "email", "id", "name", "phone"]);
+  for (const forbidden of SENSITIVE_CUSTOMER_FIELDS) {
+    assert.equal(receiptCustomerSelect[forbidden], undefined, `customer projection must not request ${forbidden}`);
+  }
+});
+
+test("receiptDetail asks Prisma for only the safe customer fields", async () => {
+  let capturedArgs = null;
+  const originalFind = prisma.receipt.findUnique;
+  prisma.receipt.findUnique = async (args) => { capturedArgs = args; return makeReceipt(); };
+  try {
+    const res = makeRes();
+    await receiptDetail({ user: makeUser("u1", "customer"), params: { id: "r1" } }, res);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(capturedArgs?.include?.customer, { select: receiptCustomerSelect });
+    assert.equal(capturedArgs?.include?.customer?.select?.passwordHash, undefined);
+    assert.equal(capturedArgs?.include?.customer?.select?.stripeCustomerId, undefined);
+  } finally {
+    prisma.receipt.findUnique = originalFind;
+  }
+});
+
+test("receiptDetail response never exposes sensitive customer columns", async () => {
+  const res = await requestReceiptDetail({ userId: "u1", role: "customer", receipt: makeReceipt() });
+  assert.equal(res.statusCode, 200);
+  const customer = res.body.receipt.customer;
+  assert.equal(customer.id, "u1");
+  assert.equal(customer.name, "Ada Lovelace");
+  assert.equal(customer.email, "ada@example.com");
+  assert.equal(customer.address, "1 Main St");
+  assert.equal(customer.phone, "555");
+  for (const leaked of SENSITIVE_CUSTOMER_FIELDS) {
+    assert.equal(leaked in customer, false, `receipt response must not expose customer.${leaked}`);
+  }
+});
+
+test("receipt list endpoints query with the restricted customer projection", async () => {
+  const originalFindMany = prisma.receipt.findMany;
+  const seen = [];
+  prisma.receipt.findMany = async (args) => { seen.push(args); return []; };
+  try {
+    await listMyReceipts({ user: makeUser("u1", "customer") }, makeRes());
+    await adminListReceipts({ user: makeUser("a1", "admin"), query: {} }, makeRes());
+  } finally {
+    prisma.receipt.findMany = originalFindMany;
+  }
+  assert.equal(seen.length, 2, "both receipt list endpoints must query receipts");
+  for (const args of seen) {
+    assert.deepEqual(args?.include?.customer, { select: receiptCustomerSelect });
+    assert.equal(args?.include?.customer?.select?.passwordHash, undefined);
+  }
+});
+
+test("adminCreateReceipt persists and returns receipts with the restricted customer projection", async () => {
+  const { db, calls } = makeDb();
+  const res = response();
+  await adminCreateReceipt({ body: { bookingId: "b1", customerId: "u1" } }, res, db);
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(calls.receiptInclude?.customer, { select: receiptCustomerSelect });
+  assert.equal(calls.receiptInclude?.customer?.select?.passwordHash, undefined);
 });
 
 // ---- Download PDF remains unchanged ----

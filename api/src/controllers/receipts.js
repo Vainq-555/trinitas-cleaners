@@ -4,8 +4,20 @@ import { badRequest } from "../utils/validators.js";
 import { buildReceiptPdf, formatMoney } from "../utils/pdf.js";
 import { receiptSnapshotData } from "./payments.js";
 
+// Explicit allow-list of customer fields a receipt may expose. A bare `true`
+// here would expand to every User scalar column — including passwordHash,
+// stripeCustomerId and the account-status flags — so the projection is spelled
+// out. These are exactly the fields the PDF and the receipt UI render.
+export const receiptCustomerSelect = {
+  id: true,
+  name: true,
+  email: true,
+  address: true,
+  phone: true,
+};
+
 const receiptInclude = {
-  customer: true,
+  customer: { select: receiptCustomerSelect },
   booking: { include: { service: true } },
 };
 
