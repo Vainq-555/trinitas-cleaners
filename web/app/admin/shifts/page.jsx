@@ -27,27 +27,25 @@ import {
 import Shell from "@/components/Shell";
 import { adminNavLinks } from "@/lib/adminNav";
 import { api } from "@/lib/api";
-import { formatChicagoSchedule } from "@/lib/schedule.mjs";
 import { requestStatusClass, requestStatusLabel } from "@/lib/employeeShifts.mjs";
+import {
+  adminAvailabilityEmployeeName,
+  adminAvailabilityList,
+  adminCandidateLabel,
+  adminCandidateList,
+  adminLocationLabel,
+  adminShiftAssigneeName,
+  adminShiftList,
+  adminShiftRequests,
+  adminShiftServiceName,
+  adminShiftWhen,
+} from "@/lib/adminShifts.mjs";
 import {
   AVAILABILITY_DISCLAIMER,
   availabilityDateLabel,
   availabilityWindowLabel,
   groupByDate,
 } from "@/lib/employeeAvailability.mjs";
-
-
-function startTimeLabel(shift) {
-  const when = formatChicagoSchedule(shift?.booking?.scheduledStartAt);
-  if (when) return `${when.date} at ${when.time}`;
-  return shift?.booking?.date ?? "Time to be confirmed";
-}
-
-function locationLabel(booking) {
-  return [booking?.serviceLocationAddressLine1, booking?.serviceLocationCity, booking?.serviceLocationState]
-    .filter(Boolean)
-    .join(", ");
-}
 
 export default function AdminShiftsPage() {
   const [shifts, setShifts] = useState([]);
@@ -69,9 +67,9 @@ export default function AdminShiftsPage() {
         api("/admin/shifts/candidates"),
         api("/admin/availability"),
       ]);
-      setShifts(Array.isArray(s?.shifts) ? s.shifts : []);
-      setCandidates(Array.isArray(c?.bookings) ? c.bookings : []);
-      setAvailability(Array.isArray(a?.availability) ? a.availability : []);
+      setShifts(adminShiftList(s));
+      setCandidates(adminCandidateList(c));
+      setAvailability(adminAvailabilityList(a));
     } catch (err) {
       setError(err);
       setShifts([]);
@@ -145,7 +143,7 @@ export default function AdminShiftsPage() {
       flash(
         "ok",
         approve
-          ? `${request.employee?.name ?? "Employee"} was approved and assigned.`
+          ? `${request.employeeName ?? "Employee"} was approved and assigned.`
           : "Request declined.",
       );
       await load();
@@ -188,7 +186,7 @@ export default function AdminShiftsPage() {
               <option value="">Select a booking…</option>
               {candidates.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {b.date} · {b.service?.name ?? "Service"} · {locationLabel(b) || "no address"}
+                  {adminCandidateLabel(b)}
                 </option>
               ))}
             </select>
@@ -243,8 +241,9 @@ export default function AdminShiftsPage() {
           ) : null}
 
           {shifts.map((shift) => {
-            const assignee = shift.booking?.employeeAssignments?.[0] ?? null;
-            const place = locationLabel(shift.booking);
+            const assigneeName = adminShiftAssigneeName(shift);
+            const place = adminLocationLabel(shift.location);
+            const requests = adminShiftRequests(shift);
             return (
               <article key={shift.id} className="card card-pad">
                 <div className="flex flex-wrap items-center gap-2">
@@ -256,16 +255,16 @@ export default function AdminShiftsPage() {
                     {shift.publishedAt ? "Open" : "Closed"}
                   </span>
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-600">
-                    {shift.booking?.service?.name ?? "Service"}
+                    {adminShiftServiceName(shift)}
                   </span>
-                  {assignee ? (
+                  {assigneeName ? (
                     <span className="rounded-full bg-warnbg px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-amber-700">
-                      Assigned: {assignee.employee?.name ?? assignee.employeeId}
+                      Assigned: {assigneeName}
                     </span>
                   ) : null}
                 </div>
 
-                <h3 className="mt-2 text-base font-bold text-ink break-words">{startTimeLabel(shift)}</h3>
+                <h3 className="mt-2 text-base font-bold text-ink break-words">{adminShiftWhen(shift)}</h3>
                 {place ? <p className="mt-1 text-sm text-slate-700 break-words">{place}</p> : null}
                 {shift.notes ? <p className="mt-1.5 text-sm text-slate-700 break-words">{shift.notes}</p> : null}
 
@@ -281,17 +280,17 @@ export default function AdminShiftsPage() {
 
                 <div className="mt-4 border-t border-slate-100 pt-3">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-muted">
-                    Requests ({shift.requests?.length ?? 0})
+                    Requests ({requests.length})
                   </h4>
-                  {(shift.requests ?? []).length === 0 ? (
+                  {requests.length === 0 ? (
                     <p className="mt-1.5 text-sm text-muted">No requests yet.</p>
                   ) : (
                     <ul className="mt-2 space-y-2">
-                      {shift.requests.map((request) => (
+                      {requests.map((request) => (
                         <li key={request.id} className="rounded-lg bg-slate-50 p-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm font-semibold text-ink">
-                              {request.employee?.name ?? "Employee"}
+                              {request.employeeName ?? "Employee"}
                             </span>
                             <span
                               className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${requestStatusClass(request.status)}`}
@@ -346,7 +345,7 @@ export default function AdminShiftsPage() {
                 <ul className="mt-1.5 space-y-1.5">
                   {group.items.map((row) => (
                     <li key={row.id} className="flex flex-wrap items-center gap-2 text-sm text-ink">
-                      <span className="font-semibold">{row.employee?.name ?? "Employee"}</span>
+                      <span className="font-semibold">{adminAvailabilityEmployeeName(row)}</span>
                       <span
                         className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
                           row.kind === "unavailable" ? "bg-slate-100 text-slate-600" : "bg-brand-light text-brand"

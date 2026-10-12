@@ -22,6 +22,18 @@ import {
   requestStatusLabel,
   shiftUnavailableReason,
 } from "../lib/employeeShifts.mjs";
+import {
+  adminAvailabilityEmployeeName,
+  adminAvailabilityList,
+  adminCandidateLabel,
+  adminCandidateList,
+  adminLocationLabel,
+  adminShiftAssigneeName,
+  adminShiftList,
+  adminShiftRequests,
+  adminShiftServiceName,
+  adminShiftWhen,
+} from "../lib/adminShifts.mjs";
 
 // Phase 2B-4 — employee availability + available shifts view helpers, and
 // production wiring regressions.
@@ -476,4 +488,188 @@ test("the admin shifts page requires an explicit booking choice, defaulting to n
 test("the admin page never presents availability as a booking constraint", () => {
   const page = code("../app/admin/shifts/page.jsx");
   assert.ok(page.includes("AVAILABILITY_DISCLAIMER"), "availability stays informational for the admin too");
+});
+
+// ───────────────────────────────────────────── admin view contract
+//
+// The admin API returns FLAT view objects. These payloads are copied from the
+// actual controller responses (api/src/controllers/shifts.js adminShiftView /
+// adminListShiftCandidates, and availability.js adminListAvailability), so the
+// helpers are exercised against the real wire shape rather than an invented one.
+
+const ADMIN_SHIFTS_PAYLOAD = {
+  shifts: [
+    {
+      id: "sh1",
+      bookingId: "b1",
+      notes: "Bring extra supplies",
+      closesAt: "2026-10-20T00:00:00.000Z",
+      publishedAt: "2026-10-10T00:00:00.000Z",
+      published: true,
+      createdAt: "2026-10-10T00:00:00.000Z",
+      serviceName: "Deep Clean",
+      requestedDate: "2026-10-25T00:00:00.000Z",
+      customerScheduledStartAt: "2026-10-25T15:00:00.000Z",
+      bookingStatus: "accepted",
+      location: {
+        addressLine1: "1 Main St",
+        city: "Chicago",
+        state: "IL",
+        postalCode: "60601",
+        instructions: "Ring bell",
+      },
+      assignment: {
+        employeeId: "e1",
+        employeeName: "Sam Employee",
+        scheduledStartAt: "2026-10-25T15:00:00.000Z",
+        visibleToEmployee: true,
+      },
+      requests: [
+        {
+          id: "req1",
+          employeeId: "e2",
+          employeeName: "Ada Requester",
+          status: "requested",
+          note: "Available all day",
+          createdAt: "2026-10-11T00:00:00.000Z",
+          decidedAt: null,
+        },
+      ],
+    },
+  ],
+};
+
+const ADMIN_CANDIDATES_PAYLOAD = {
+  candidates: [
+    {
+      id: "b9",
+      serviceName: "Standard Clean",
+      requestedDate: "2026-10-27T00:00:00.000Z",
+      scheduledStartAt: null,
+      city: "Evanston",
+      state: "IL",
+    },
+  ],
+};
+
+const ADMIN_AVAILABILITY_PAYLOAD = {
+  availability: [
+    {
+      id: "av1",
+      employeeId: "e3",
+      date: "2026-10-28",
+      startTime: "09:00",
+      endTime: "13:00",
+      kind: "available",
+      note: null,
+      createdAt: "2026-10-01T00:00:00.000Z",
+      updatedAt: "2026-10-01T00:00:00.000Z",
+      employeeName: "Grace Employee",
+    },
+  ],
+};
+
+test("admin list helpers read the server's flat envelopes, not a nested one", () => {
+  assert.equal(adminShiftList(ADMIN_SHIFTS_PAYLOAD).length, 1);
+  assert.equal(adminCandidateList(ADMIN_CANDIDATES_PAYLOAD).length, 1);
+  assert.equal(adminAvailabilityList(ADMIN_AVAILABILITY_PAYLOAD).length, 1);
+
+  // The candidates route returns `{ candidates }`; an older `{ bookings }` shape
+  // must not be silently accepted (that is what left the picker empty).
+  assert.deepEqual(adminCandidateList({ bookings: [{ id: "b1" }] }), []);
+  assert.deepEqual(adminShiftList({ candidates: [] }), []);
+  for (const bad of [undefined, null, {}, { shifts: "nope" }]) {
+    assert.deepEqual(adminShiftList(bad), []);
+  }
+  assert.deepEqual(adminAvailabilityList(undefined), []);
+});
+
+test("adminCandidateLabel uses the candidate's own flat fields", () => {
+  const [candidate] = ADMIN_CANDIDATES_PAYLOAD.candidates;
+  assert.equal(
+    adminCandidateLabel(candidate),
+    "2026-10-27T00:00:00.000Z · Standard Clean · Evanston, IL",
+  );
+  // A candidate with no service or place still yields a usable option.
+  assert.equal(adminCandidateLabel({ requestedDate: "2026-10-27" }), "2026-10-27 · Service · no address");
+  assert.equal(adminCandidateLabel(null), " · Service · no address");
+});
+
+test("adminShiftWhen renders the booking instant, then falls back to the requested date", () => {
+  const [shift] = ADMIN_SHIFTS_PAYLOAD.shifts;
+  assert.match(adminShiftWhen(shift), / at /, "a valid instant renders as a date and time");
+  // No scheduled instant: the requested date is passed through verbatim.
+  assert.equal(
+    adminShiftWhen({ requestedDate: "2026-10-27T00:00:00.000Z", customerScheduledStartAt: null }),
+    "2026-10-27T00:00:00.000Z",
+  );
+  // Neither field: an explicit placeholder, never "Invalid Date".
+  assert.equal(adminShiftWhen({}), "Time to be confirmed");
+});
+
+test("adminShiftServiceName reads the flat serviceName", () => {
+  const [shift] = ADMIN_SHIFTS_PAYLOAD.shifts;
+  assert.equal(adminShiftServiceName(shift), "Deep Clean");
+  assert.equal(adminShiftServiceName({ booking: { service: { name: "Nested Clean" } } }), "Service");
+});
+
+test("adminLocationLabel joins the flat location fields and drops blanks", () => {
+  const [shift] = ADMIN_SHIFTS_PAYLOAD.shifts;
+  assert.equal(adminLocationLabel(shift.location), "1 Main St, Chicago, IL");
+  assert.equal(adminLocationLabel({ addressLine1: "", city: "Chicago", state: null }), "Chicago");
+  assert.equal(adminLocationLabel(null), "");
+});
+
+test("adminShiftAssigneeName reads the flat assignment, never booking.employeeAssignments", () => {
+  const [shift] = ADMIN_SHIFTS_PAYLOAD.shifts;
+  assert.equal(adminShiftAssigneeName(shift), "Sam Employee");
+  // Unassigned work has no badge.
+  assert.equal(adminShiftAssigneeName({ assignment: null }), null);
+  assert.equal(adminShiftAssigneeName({}), null);
+  // A nameless employee still renders something identifiable, never "undefined".
+  assert.equal(adminShiftAssigneeName({ assignment: { employeeId: "e9", employeeName: null } }), "e9");
+  // The nested shape the server never sends must resolve to no assignee.
+  assert.equal(
+    adminShiftAssigneeName({ booking: { employeeAssignments: [{ employee: { name: "Nested" } }] } }),
+    null,
+  );
+});
+
+test("adminShiftRequests reads the flat requests list, with employeeName on each", () => {
+  const [shift] = ADMIN_SHIFTS_PAYLOAD.shifts;
+  const requests = adminShiftRequests(shift);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].employeeName, "Ada Requester");
+  assert.equal(requests[0].status, "requested");
+  // Missing list is an empty list, never a crash on `.map`.
+  assert.deepEqual(adminShiftRequests({}), []);
+  assert.deepEqual(adminShiftRequests(null), []);
+});
+
+test("adminAvailabilityEmployeeName reads the flat employeeName, not an employee object", () => {
+  assert.equal(adminAvailabilityEmployeeName(ADMIN_AVAILABILITY_PAYLOAD.availability[0]), "Grace Employee");
+  assert.equal(adminAvailabilityEmployeeName({ employee: { name: "Nested" } }), "Employee");
+  assert.equal(adminAvailabilityEmployeeName(null), "Employee");
+});
+
+test("the admin shifts page presents the API through the shared flat-view helpers", () => {
+  const page = code("../app/admin/shifts/page.jsx");
+  for (const helper of [
+    "adminShiftList",
+    "adminCandidateList",
+    "adminAvailabilityList",
+    "adminCandidateLabel",
+    "adminShiftWhen",
+    "adminShiftServiceName",
+    "adminLocationLabel",
+    "adminShiftAssigneeName",
+    "adminShiftRequests",
+    "adminAvailabilityEmployeeName",
+  ]) {
+    assert.ok(page.includes(helper), `the admin page must present the view via ${helper}`);
+  }
+  // The nested shapes the server never sends must be gone from the page.
+  assert.ok(!/shift\.booking\?\./.test(page), "must not read the flat shift view through booking.*");
+  assert.ok(!/c\?\.bookings/.test(page), "candidates arrive as { candidates }");
+  assert.ok(!/\.employee\?\.name/.test(page), "views carry employeeName, not an employee object");
 });
