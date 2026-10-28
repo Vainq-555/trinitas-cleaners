@@ -143,7 +143,9 @@ test("adminListUsers: the admin user list stays customer-only (employees are not
     { user: { findMany: async (a) => { args = a; return []; } } },
     () => adminListUsers({ user: { id: "a1", role: ROLES.ADMIN } }, response()),
   );
-  assert.deepEqual(args.where, { role: "customer" });
+  assert.equal(args.where.role, "customer");
+  assert.equal(args.where.disabledAt, null);
+  assert.deepEqual(args.where.email, { not: { endsWith: "@deleted.invalid" } });
 });
 
 test("adminListContactTargets: admin messaging targets stay customer-only (preserved)", async () => {
@@ -152,8 +154,87 @@ test("adminListContactTargets: admin messaging targets stay customer-only (prese
     { user: { findMany: async (a) => { args = a; return []; } } },
     () => adminListContactTargets({ user: { id: "a1", role: ROLES.ADMIN } }, response()),
   );
-  assert.deepEqual(args.where, { role: "customer" });
+  assert.equal(args.where.role, "customer");
+  assert.equal(args.where.disabledAt, null);
+  assert.deepEqual(args.where.email, { not: { endsWith: "@deleted.invalid" } });
   // Admins reach employees through /admin/employees, so the employee admin
   // workflow is unaffected by the inspect guard.
   assert.equal(args.where.role !== ROLES.EMPLOYEE, true);
+});
+
+test("adminListUsers: closed former employee (disabledAt set, deleted.invalid email) is excluded by query filters", async () => {
+  let args = null;
+  await withDb(
+    { user: { findMany: async (a) => { args = a; return []; } } },
+    () => adminListUsers({ user: { id: "a1", role: ROLES.ADMIN } }, response()),
+  );
+  assert.equal(args.where.role, "customer");
+  assert.equal(args.where.disabledAt, null);
+  assert.deepEqual(args.where.email, { not: { endsWith: "@deleted.invalid" } });
+});
+
+test("adminListContactTargets: closed former employee excluded by query filters", async () => {
+  let args = null;
+  await withDb(
+    { user: { findMany: async (a) => { args = a; return []; } } },
+    () => adminListContactTargets({ user: { id: "a1", role: ROLES.ADMIN } }, response()),
+  );
+  assert.equal(args.where.role, "customer");
+  assert.equal(args.where.disabledAt, null);
+  assert.deepEqual(args.where.email, { not: { endsWith: "@deleted.invalid" } });
+});
+
+test("adminStats: total and online customer counts use the same active-customer eligibility filters", async () => {
+  const counts = [];
+  const bookings = [];
+  const res = response();
+  await withDb(
+    {
+      user: {
+        count: async (a) => {
+          counts.push(a?.where || null);
+          return 0;
+        },
+      },
+      booking: {
+        count: async (a) => {
+          bookings.push(a?.where || null);
+          return 0;
+        },
+      },
+    },
+    async () => {
+      const mod = await import("../src/controllers/users.js");
+      await mod.adminStats({ user: { id: "a1", role: ROLES.ADMIN } }, res);
+    },
+  );
+  assert.equal(counts.length, 2);
+  const onlineWhere = counts[0];
+  const totalWhere = counts[1];
+  assert.equal(onlineWhere.role, "customer");
+  assert.equal(onlineWhere.disabledAt, null);
+  assert.deepEqual(onlineWhere.email, { not: { endsWith: "@deleted.invalid" } });
+  assert.equal(onlineWhere.status, "online");
+  assert.equal(totalWhere.role, "customer");
+  assert.equal(totalWhere.disabledAt, null);
+  assert.deepEqual(totalWhere.email, { not: { endsWith: "@deleted.invalid" } });
+  assert.equal(totalWhere.status, undefined);
+  assert.equal(bookings.length, 3);
+  assert.deepEqual(bookings[0], { status: "pending" });
+  assert.deepEqual(bookings[1], { status: "worked" });
+  assert.deepEqual(bookings[2], { status: "declined" });
+});
+
+test("adminListUsers: active customer remains eligible and appears in response", async () => {
+  let args = null;
+  const res = response();
+  const active = [{ id: "c1", role: "customer", name: "Active", email: "active@example.com", disabledAt: null }];
+  await withDb(
+    { user: { findMany: async (a) => { args = a; return active; } } },
+    () => adminListUsers({ user: { id: "a1", role: ROLES.ADMIN } }, res),
+  );
+  assert.equal(args.where.role, "customer");
+  assert.equal(args.where.disabledAt, null);
+  assert.deepEqual(args.where.email, { not: { endsWith: "@deleted.invalid" } });
+  assert.equal(res.body.users, active);
 });

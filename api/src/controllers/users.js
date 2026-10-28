@@ -11,10 +11,16 @@ const publicUser = (u) => ({
   lastActiveAt: u.lastActiveAt,
 });
 
+const activeCustomerWhere = {
+  role: "customer",
+  disabledAt: null,
+  email: { not: { endsWith: "@deleted.invalid" } },
+};
+
 // Dashboard & user monitoring: who is logged in/out, online/offline.
 export async function adminListUsers(req, res) {
   const users = await prisma.user.findMany({
-    where: { role: "customer" },
+    where: activeCustomerWhere,
     orderBy: [{ status: "desc" }, { name: "asc" }],
     select: {
       id: true,
@@ -96,15 +102,15 @@ export async function adminGetCustomer(req, res) {
 
 // Minimal contact target list for admin messaging.
 export async function adminListContactTargets(req, res) {
-  const users = await prisma.user.findMany({ where: { role: "customer" } });
+  const users = await prisma.user.findMany({ where: activeCustomerWhere });
   res.json({ users: users.map(publicUser) });
 }
 
 // Simple admin stats for the dashboard header.
 export async function adminStats(req, res) {
   const [online, totalCustomers, pending, worked, declined] = await Promise.all([
-    prisma.user.count({ where: { role: "customer", status: "online" } }),
-    prisma.user.count({ where: { role: "customer" } }),
+    prisma.user.count({ where: { ...activeCustomerWhere, status: "online" } }),
+    prisma.user.count({ where: activeCustomerWhere }),
     prisma.booking.count({ where: { status: "pending" } }),
     prisma.booking.count({ where: { status: "worked" } }),
     prisma.booking.count({ where: { status: "declined" } }),
