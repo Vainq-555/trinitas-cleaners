@@ -1,7 +1,11 @@
+import { parseRetryAfterMs } from "./requestResilience.mjs";
+
 const BASE = "/api";
 
 // Thin wrapper around fetch that keeps cookies same-origin via the Next rewrite.
 // Returns parsed JSON. Throws { status, error } on non-2xx.
+// Retries are deliberately NOT automatic: callers decide whether an operation is
+// safe to retry, so login and other non-idempotent requests are never replayed.
 export async function api(path, { method = "GET", body, headers = {} } = {}) {
   const res = await fetch(BASE + path, {
     method,
@@ -24,9 +28,14 @@ export async function api(path, { method = "GET", body, headers = {} } = {}) {
   }
 
   if (!res.ok) {
-    const err = new Error(data?.error || `Request failed (${res.status})`);
+    const fallback =
+      res.status === 429
+        ? "The service is temporarily busy. Please wait a moment and try again."
+        : `Request failed (${res.status})`;
+    const err = new Error(data?.error || fallback);
     err.status = res.status;
     err.data = data;
+    err.retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
     throw err;
   }
   return data;

@@ -2,13 +2,28 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import {
+  HEARTBEAT_INTERVAL_MS,
+  heartbeatDelayAfter,
+} from "./requestResilience.mjs";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const heartbeatRef = useRef(null);
+  const heartbeatTimerRef = useRef(null);
+  const heartbeatInFlightRef = useRef(false);
+  const heartbeatAttemptRef = useRef(0);
+  const heartbeatUserRef = useRef(null);
+  const mountedRef = useRef(true);
+
+  const clearHeartbeat = useCallback(() => {
+    if (heartbeatTimerRef.current !== null) {
+      clearTimeout(heartbeatTimerRef.current);
+      heartbeatTimerRef.current = null;
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -21,20 +36,64 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const runHeartbeat = useCallback(async () => {
+    heartbeatTimerRef.current = null;
+    if (!mountedRef.current || !heartbeatUserRef.current || heartbeatInFlightRef.current) return;
+    heartbeatInFlightRef.current = true;
+
+    try {
+      await api("/auth/heartbeat", { method: "POST" });
+      heartbeatAttemptRef.current = 0;
+      if (mountedRef.current && heartbeatUserRef.current) {
+        heartbeatTimerRef.current = setTimeout(runHeartbeat, HEARTBEAT_INTERVAL_MS);
+      }
+    } catch (err) {
+      if (!mountedRef.current || !heartbeatUserRef.current) return;
+
+      const delay = heartbeatDelayAfter({
+        ok: false,
+        status: err?.status,
+        retryAfterMs: err?.retryAfterMs,
+        attempt: heartbeatAttemptRef.current,
+      });
+      if (delay === null) {
+        setUser(null);
+        return;
+      }
+
+      heartbeatAttemptRef.current = Math.min(heartbeatAttemptRef.current + 1, 10);
+      heartbeatTimerRef.current = setTimeout(runHeartbeat, delay);
+    } finally {
+      heartbeatInFlightRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearHeartbeat();
+    };
+  }, [clearHeartbeat]);
+
   useEffect(() => {
     refresh().finally(() => setLoading(false));
-
-    // Keeps the user marked "online" for the admin monitoring dashboard.
-    heartbeatRef.current = setInterval(async () => {
-      try {
-        await api("/auth/heartbeat", { method: "POST" });
-      } catch {
-        /* ignore */
-      }
-    }, 60_000);
-
-    return () => clearInterval(heartbeatRef.current);
   }, [refresh]);
+
+  useEffect(() => {
+    heartbeatUserRef.current = user;
+    clearHeartbeat();
+    heartbeatAttemptRef.current = 0;
+
+    // Only authenticated sessions need presence heartbeats. A recursive timeout
+    // (rather than setInterval) prevents a slow request from overlapping the next
+    // one, and a retryable failure backs off instead of firing at a fixed rate.
+    if (!user) return undefined;
+    if (!heartbeatInFlightRef.current) {
+      heartbeatTimerRef.current = setTimeout(runHeartbeat, HEARTBEAT_INTERVAL_MS);
+    }
+    return clearHeartbeat;
+  }, [user, clearHeartbeat, runHeartbeat]);
 
   const logout = useCallback(async () => {
     try {
